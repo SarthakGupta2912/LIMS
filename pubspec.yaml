@@ -10,7 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   window_manager: ^0.5.1
-  shared_preferences: ^2.5.3
+  shared_preferences: ^2.5.4
   path_provider: ^2.1.5
   filesystem_picker: ^4.1.0
   pdf: ^3.11.3
