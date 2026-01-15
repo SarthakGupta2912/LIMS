@@ -1,3 +1,3 @@
-# invoice_management_system
+# LIMS (Localized Invoice Management System)
 
 Invoice generator and management system
