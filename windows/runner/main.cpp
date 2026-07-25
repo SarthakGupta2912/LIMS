@@ -27,7 +27,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   FlutterWindow window(project);
   Win32Window::Point origin(40, 40);
   Win32Window::Size size(1000, 620);
-  if (!window.Create(L"Invoice Management System", origin, size)) {
+  if (!window.Create(L"LIMS", origin, size)) {
     return EXIT_FAILURE;
   }
   window.SetQuitOnClose(true);

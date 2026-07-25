@@ -744,6 +744,11 @@ Future<List<int>> buildInvoicePdf(
   final boldFont = pw.Font.ttf(
     await rootBundle.load('assets/fonts/Poppins-Bold.ttf'),
   );
+  final watermark = pw.MemoryImage(
+    (await rootBundle.load(
+      'assets/invoice-manager-logo-wordmark.png',
+    )).buffer.asUint8List(),
+  );
   final logo =
       template.logoPath != null && File(template.logoPath!).existsSync()
       ? pw.MemoryImage(await File(template.logoPath!).readAsBytes())
@@ -1133,6 +1138,19 @@ Future<List<int>> buildInvoicePdf(
         fit: pw.StackFit.expand,
         children: [
           pw.Positioned.fill(child: pw.Container(color: PdfColors.white)),
+          pw.Positioned.fill(
+            child: pw.Center(
+              child: pw.Opacity(
+                opacity: .045,
+                child: pw.Image(
+                  watermark,
+                  width: 260,
+                  height: 320,
+                  fit: pw.BoxFit.contain,
+                ),
+              ),
+            ),
+          ),
           pw.Positioned(
             left: 0,
             top: 0,

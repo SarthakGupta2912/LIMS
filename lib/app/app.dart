@@ -8,17 +8,20 @@ import '../pages/products/products_page.dart';
 import '../pages/settings/settings_page.dart';
 import '../pages/templates/templates_page.dart';
 import '../shared/ui.dart';
+import '../splash.dart';
 import 'responsive.dart';
 import 'theme.dart';
 
 class InvoiceApp extends StatelessWidget {
-  const InvoiceApp({super.key});
+  final Future<void> Function()? initialize;
+
+  const InvoiceApp({super.key, this.initialize});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Invoice Manager',
+      title: 'LIMS',
       theme: buildAppTheme(),
       builder: (context, child) {
         final mediaQuery = MediaQuery.of(context);
@@ -27,17 +30,9 @@ class InvoiceApp extends StatelessWidget {
           child: child ?? const SizedBox.shrink(),
         );
       },
-      home: FutureBuilder<void>(
-        future: AppDatabase.instance.open(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
-            return const _StartupScreen();
-          }
-          if (snapshot.hasError) {
-            return _StartupError(error: snapshot.error.toString());
-          }
-          return const AppShell();
-        },
+      home: SplashScreen(
+        initialize: initialize ?? AppDatabase.instance.open,
+        child: const AppShell(),
       ),
     );
   }
@@ -114,7 +109,7 @@ class _AppShellState extends State<AppShell> {
         appBar: mobileShell
             ? AppBar(
                 title: const CustomText(
-                  'Invoice Manager',
+                  'LIMS',
                   variant: CustomTextStyle.subtitle,
                 ),
               )
@@ -329,7 +324,7 @@ class _DesktopNav extends StatelessWidget {
                               const SizedBox(width: 12),
                               const Expanded(
                                 child: CustomText(
-                                  'Invoice Manager',
+                                  'LIMS',
                                   variant: CustomTextStyle.title,
                                   maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
@@ -431,35 +426,6 @@ class _DesktopNavItem extends StatelessWidget {
                 ],
               ],
             ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _StartupScreen extends StatelessWidget {
-  const _StartupScreen();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Scaffold(body: Center(child: CircularProgressIndicator()));
-  }
-}
-
-class _StartupError extends StatelessWidget {
-  final String error;
-  const _StartupError({required this.error});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: CustomText(
-            'Could not open local database.\n\n$error',
-            textAlign: TextAlign.center,
           ),
         ),
       ),

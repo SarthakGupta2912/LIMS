@@ -2,7 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:invoice_management_system/app/app.dart';
+import 'package:lims/app/app.dart';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart' as lgw;
 import 'package:screen_retriever/screen_retriever.dart';
 import 'package:window_manager/window_manager.dart';
@@ -24,7 +24,7 @@ Future<void> main() async {
       center: true,
       backgroundColor: const Color(0xFFF6F8FB),
       skipTaskbar: false,
-      title: 'Invoice Manager',
+      title: 'LIMS',
       titleBarStyle: TitleBarStyle.normal,
     );
     windowManager.waitUntilReadyToShow(windowOptions, () async {

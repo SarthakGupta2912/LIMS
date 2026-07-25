@@ -5,24 +5,24 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "invoice_management_system (windows)",
+            "name": "LIMS (windows)",
             "request": "launch",
             "type": "dart",
             "deviceId": "windows"
         },
         {
-            "name": "invoice_management_system",
+            "name": "LIMS",
             "request": "launch",
             "type": "dart"
         },
         {
-            "name": "invoice_management_system (profile mode)",
+            "name": "LIMS (profile mode)",
             "request": "launch",
             "type": "dart",
             "flutterMode": "profile"
         },
         {
-            "name": "invoice_management_system (release mode)",
+            "name": "LIMS (release mode)",
             "request": "launch",
             "type": "dart",
             "flutterMode": "release"

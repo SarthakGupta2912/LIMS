@@ -1,8 +1,8 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:invoice_management_system/core/app_database.dart';
-import 'package:invoice_management_system/pages/billing/billing_page.dart';
+import 'package:lims/core/app_database.dart';
+import 'package:lims/pages/billing/billing_page.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

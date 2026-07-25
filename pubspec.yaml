@@ -1,5 +1,5 @@
-name: invoice_management_system
-description: "Invoice generator and management system"
+name: lims
+description: "LIMS invoice generator and management system"
 publish_to: 'none'
 version: 2.0.0+2
 
@@ -31,3 +31,5 @@ flutter:
   assets:
     - assets/fonts/Poppins-Regular.ttf
     - assets/fonts/Poppins-Bold.ttf
+    - assets/invoice-manager-playstore-icon-1024.png
+    - assets/invoice-manager-logo-wordmark.png

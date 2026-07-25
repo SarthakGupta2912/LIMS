@@ -5,10 +5,10 @@
 // 'flutter create' template.
 
 // The application's name. By default this is also the title of the Flutter window.
-PRODUCT_NAME = invoice_management_system
+PRODUCT_NAME = LIMS
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = com.Sarthak.invoiceManagementSystem
+PRODUCT_BUNDLE_IDENTIFIER = com.Sarthak.lims
 
 // The copyright displayed in application information
 PRODUCT_COPYRIGHT = Copyright © 2025 com.Sarthak. All rights reserved.

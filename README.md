@@ -1,4 +1,4 @@
-# Invoice Management System
+# LIMS
 
 Offline-first invoice software for small businesses that need a simple, local, and affordable way to manage products, invoice templates, billing, and PDF invoices across Android and Windows.
 
