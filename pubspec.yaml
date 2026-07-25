@@ -1,20 +1,25 @@
 name: invoice_management_system
 description: "Invoice generator and management system"
 publish_to: 'none'
-version: 0.1.0
+version: 1.0.0+1
 
 environment:
-  sdk: ^3.10.3
-
+  sdk: ^3.12.2
 dependencies:
   flutter:
     sdk: flutter
-  window_manager: ^0.5.1
-  shared_preferences: ^2.5.4
-  path_provider: ^2.1.5
-  filesystem_picker: ^4.1.0
-  pdf: ^3.11.3
-  printing: ^5.14.2
+  window_manager: ^0.5.2
+  screen_retriever: ^0.2.2
+  shared_preferences: ^2.5.5
+  path_provider: ^2.1.6
+  path: ^1.9.1
+  sqlite3: ^3.5.0
+  sqlite3_flutter_libs: ^0.6.0+eol
+  file_picker: '>=10.3.7 <11.0.0'
+  google_fonts: ^6.3.2
+  pdf: ^3.13.0
+  liquid_glass_widgets: ^0.22.1
+  qr_flutter: ^4.1.0
 
 dev_dependencies:
   flutter_test:
@@ -23,3 +28,6 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/fonts/Poppins-Regular.ttf
+    - assets/fonts/Poppins-Bold.ttf

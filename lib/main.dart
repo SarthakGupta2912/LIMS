@@ -1,21 +1,30 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:invoice_management_system/Functions/Functions.dart';
-import 'package:invoice_management_system/Pages/Splash.dart';
+import 'package:invoice_management_system/app/app.dart';
+import 'package:liquid_glass_widgets/liquid_glass_widgets.dart' as lgw;
+import 'package:screen_retriever/screen_retriever.dart';
 import 'package:window_manager/window_manager.dart';
 
 Future<void> main() async {
-  if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
-    WidgetsFlutterBinding.ensureInitialized();
-    // Must add this line.
+  WidgetsFlutterBinding.ensureInitialized();
+  await lgw.LiquidGlassWidgets.initialize();
+
+  if (!kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux)) {
     await windowManager.ensureInitialized();
-    WindowOptions windowOptions = WindowOptions(
-      size: Size(800, 600),
-      minimumSize: Size(800, 600),
+    final primaryDisplay = await screenRetriever.getPrimaryDisplay();
+    final windowSize = _initialWindowSize(primaryDisplay);
+    final windowOptions = WindowOptions(
+      size: windowSize,
+      minimumSize: Size(
+        windowSize.width < 760 ? windowSize.width : 760,
+        windowSize.height < 520 ? windowSize.height : 520,
+      ),
       center: true,
-      backgroundColor: Colors.black,
+      backgroundColor: const Color(0xFFF6F8FB),
       skipTaskbar: false,
+      title: 'Invoice Manager',
       titleBarStyle: TitleBarStyle.normal,
     );
     windowManager.waitUntilReadyToShow(windowOptions, () async {
@@ -23,65 +32,29 @@ Future<void> main() async {
       await windowManager.focus();
     });
   }
-  runApp(const MainApp());
+
+  runApp(
+    lgw.LiquidGlassWidgets.wrap(
+      adaptiveQuality: true,
+      theme: lgw.GlassThemeData.simple(
+        blur: 10,
+        thickness: 28,
+        chromaticAberration: 0,
+        lightIntensity: .18,
+        ambientStrength: .04,
+        refractiveIndex: 1.14,
+        saturation: 1.05,
+        quality: lgw.GlassQuality.standard,
+        brightness: Brightness.dark,
+      ),
+      child: const InvoiceApp(),
+    ),
+  );
 }
 
-class MainApp extends StatelessWidget {
-  const MainApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    media = MediaQuery.of(context).size;
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'Invoice Manager',
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF1A237E), // Deep Indigo
-          brightness: Brightness.light,
-        ),
-        scaffoldBackgroundColor: const Color(0xFFF5F5F5),
-        appBarTheme: const AppBarTheme(
-          centerTitle: true,
-          elevation: 0,
-          backgroundColor: Color(0xFF1A237E),
-          foregroundColor: Colors.white,
-        ),
-        // cardTheme removed to avoid type error
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: Colors.white,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide.none,
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: Colors.grey.shade300),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: Color(0xFF1A237E), width: 2),
-          ),
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 16,
-            vertical: 16,
-          ),
-        ),
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF1A237E),
-            foregroundColor: Colors.white,
-            elevation: 2,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-          ),
-        ),
-      ),
-      home: const Scaffold(body: SplashScreen()),
-    );
-  }
+Size _initialWindowSize(Display display) {
+  final visibleSize = display.visibleSize ?? display.size;
+  final availableWidth = (visibleSize.width - 80).clamp(640, 1120).toDouble();
+  final availableHeight = (visibleSize.height - 80).clamp(480, 680).toDouble();
+  return Size(availableWidth, availableHeight);
 }
