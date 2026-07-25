@@ -1,7 +1,7 @@
 name: invoice_management_system
 description: "Invoice generator and management system"
 publish_to: 'none'
-version: 1.0.0+1
+version: 2.0.0+2
 
 environment:
   sdk: ^3.12.2
@@ -16,9 +16,9 @@ dependencies:
   sqlite3: ^3.5.0
   sqlite3_flutter_libs: ^0.6.0+eol
   file_picker: '>=10.3.7 <11.0.0'
-  google_fonts: ^6.3.2
+  google_fonts: ^8.2.0
   pdf: ^3.13.0
-  liquid_glass_widgets: ^0.22.1
+  liquid_glass_widgets: ^0.23.0
   qr_flutter: ^4.1.0
 
 dev_dependencies:

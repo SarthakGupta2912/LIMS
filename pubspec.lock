@@ -196,10 +196,10 @@ packages:
     dependency: "direct main"
     description:
       name: google_fonts
-      sha256: ba03d03bcaa2f6cb7bd920e3b5027181db75ab524f8891c8bc3aa603885b8055
+      sha256: d3f251381df389f7418d4dff416bd27c0a23138df22969aafd28c4a4b1bb3cd6
       url: "https://pub.dev"
     source: hosted
-    version: "6.3.3"
+    version: "8.2.0"
   hooks:
     dependency: transitive
     description:
@@ -292,10 +292,10 @@ packages:
     dependency: "direct main"
     description:
       name: liquid_glass_widgets
-      sha256: "62f498b0a4a5c4c09b6798f4c12267baadfc81eb71933158e27dfde5e94c355a"
+      sha256: "52dfcfd753af4acc43b98abd9ac0cc90c45dc060554a59422b953897f6909f7e"
       url: "https://pub.dev"
     source: hosted
-    version: "0.22.1"
+    version: "0.23.0"
   logging:
     dependency: transitive
     description:
