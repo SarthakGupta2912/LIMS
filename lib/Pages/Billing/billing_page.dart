@@ -7,6 +7,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:qr_flutter/qr_flutter.dart';
 
+import '../../app/responsive.dart';
 import '../../core/app_database.dart';
 import '../../shared/ui.dart';
 
@@ -160,6 +161,7 @@ class _BillingPageState extends State<BillingPage> {
   @override
   Widget build(BuildContext context) {
     final products = AppDatabase.instance.products(query: _search.text);
+    final landscape = Breakpoints.landscapeMobile(context);
     return PageFrame(
       title: 'Billing',
       subtitle: 'Create invoices quickly from your saved product catalog.',
@@ -178,7 +180,9 @@ class _BillingPageState extends State<BillingPage> {
               : SizedBox(),
         ),
       ],
+      scrollable: landscape,
       child: Column(
+        mainAxisSize: landscape ? MainAxisSize.min : MainAxisSize.max,
         children: [
           TextField(
             controller: _search,
@@ -189,59 +193,83 @@ class _BillingPageState extends State<BillingPage> {
             ),
           ),
           const SizedBox(height: 14),
-          Expanded(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final splitLayout = constraints.maxWidth >= 820;
-                return products.isEmpty
-                    ? EmptyPanel(
-                        icon: Icons.point_of_sale,
-                        title: 'No products available',
-                        message: 'Add products before starting billing.',
-                        action: FilledButton.icon(
-                          onPressed: widget.onNeedProduct,
-                          icon: const Icon(Icons.add),
-                          label: const CustomText(
-                            'Add product',
-                            color: Color(0xFF062026),
-                            variant: CustomTextStyle.label,
-                          ),
-                        ),
-                      )
-                    : splitLayout
-                    ? Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: _ProductPicker(
-                              products: products,
-                              cart: _cart,
-                              enabled: !_generating,
-                              onQty: _changeQty,
+          if (landscape)
+            products.isEmpty
+                ? EmptyPanel(
+                    icon: Icons.point_of_sale,
+                    title: 'No products available',
+                    message: 'Add products before starting billing.',
+                    action: FilledButton.icon(
+                      onPressed: widget.onNeedProduct,
+                      icon: const Icon(Icons.add),
+                      label: const CustomText(
+                        'Add product',
+                        color: Color(0xFF062026),
+                        variant: CustomTextStyle.label,
+                      ),
+                    ),
+                  )
+                : _ProductPicker(
+                    products: products,
+                    cart: _cart,
+                    enabled: !_generating,
+                    onQty: _changeQty,
+                    shrinkWrap: true,
+                  )
+          else
+            Expanded(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final splitLayout = constraints.maxWidth >= 820;
+                  return products.isEmpty
+                      ? EmptyPanel(
+                          icon: Icons.point_of_sale,
+                          title: 'No products available',
+                          message: 'Add products before starting billing.',
+                          action: FilledButton.icon(
+                            onPressed: widget.onNeedProduct,
+                            icon: const Icon(Icons.add),
+                            label: const CustomText(
+                              'Add product',
+                              color: Color(0xFF062026),
+                              variant: CustomTextStyle.label,
                             ),
                           ),
-                          const SizedBox(width: 16),
-                          SizedBox(
-                            width: 340,
-                            child: _CartPanel(
-                              lines: _lines,
-                              total: _total,
-                              generating: _generating,
-                              onGenerate: _generateInvoice,
-                              onQty: _changeQty,
+                        )
+                      : splitLayout
+                      ? Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: _ProductPicker(
+                                products: products,
+                                cart: _cart,
+                                enabled: !_generating,
+                                onQty: _changeQty,
+                              ),
                             ),
-                          ),
-                        ],
-                      )
-                    : _ProductPicker(
-                        products: products,
-                        cart: _cart,
-                        enabled: !_generating,
-                        onQty: _changeQty,
-                      );
-              },
+                            const SizedBox(width: 16),
+                            SizedBox(
+                              width: 340,
+                              child: _CartPanel(
+                                lines: _lines,
+                                total: _total,
+                                generating: _generating,
+                                onGenerate: _generateInvoice,
+                                onQty: _changeQty,
+                              ),
+                            ),
+                          ],
+                        )
+                      : _ProductPicker(
+                          products: products,
+                          cart: _cart,
+                          enabled: !_generating,
+                          onQty: _changeQty,
+                        );
+                },
+              ),
             ),
-          ),
         ],
       ),
     );
@@ -300,17 +328,23 @@ class _ProductPicker extends StatelessWidget {
   final Map<int, CartLine> cart;
   final bool enabled;
   final void Function(ProductRecord product, int delta) onQty;
+  final bool shrinkWrap;
 
   const _ProductPicker({
     required this.products,
     required this.cart,
     required this.enabled,
     required this.onQty,
+    this.shrinkWrap = false,
   });
 
   @override
   Widget build(BuildContext context) {
     return ListView.separated(
+      shrinkWrap: shrinkWrap,
+      physics: shrinkWrap
+          ? const NeverScrollableScrollPhysics()
+          : const AlwaysScrollableScrollPhysics(),
       itemCount: products.length,
       separatorBuilder: (_, _) => const SizedBox(height: 10),
       itemBuilder: (context, index) {
@@ -325,7 +359,7 @@ class _ProductPicker extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
             subtitle: CustomText(
-              'ID ${product.id ?? '-'}  -  ${money(product.price)}',
+              money(product.price),
               variant: CustomTextStyle.caption,
               color: Colors.white.withValues(alpha: .72),
               maxLines: 1,

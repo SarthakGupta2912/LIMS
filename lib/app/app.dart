@@ -48,12 +48,24 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   final _productsKey = GlobalKey<ProductsPageState>();
   final _templatesKey = GlobalKey<TemplatesPageState>();
+  final List<int> _history = [];
   int _index = 0;
 
   void _refresh() => setState(() {});
   void _go(int index) {
     if (index == _index) return;
-    setState(() => _index = index);
+    setState(() {
+      _history
+        ..remove(_index)
+        ..add(_index);
+      if (_history.length > 5) _history.removeAt(0);
+      _index = index;
+    });
+  }
+
+  void _goBack() {
+    if (_history.isEmpty) return;
+    setState(() => _index = _history.removeLast());
   }
 
   void _addProduct() {
@@ -101,41 +113,39 @@ class _AppShellState extends State<AppShell> {
         ? _StablePageViewport(index: _index, pages: pages)
         : RepaintBoundary(child: pages[_index]);
 
-    return GlassBackground(
-      child: Scaffold(
-        extendBody: true,
-        resizeToAvoidBottomInset: false,
-        backgroundColor: Colors.transparent,
-        appBar: mobileShell
-            ? AppBar(
-                title: const CustomText(
-                  'LIMS',
-                  variant: CustomTextStyle.subtitle,
+    return PopScope(
+      canPop: _history.isEmpty,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _goBack();
+      },
+      child: GlassBackground(
+        child: Scaffold(
+          extendBody: true,
+          resizeToAvoidBottomInset: false,
+          backgroundColor: Colors.transparent,
+          body: mobileShell
+              ? SafeArea(top: true, bottom: false, child: content)
+              : Row(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: _DesktopNav(index: _index, onChanged: _go),
+                    ),
+                    Expanded(child: content),
+                  ],
                 ),
-              )
-            : null,
-        body: mobileShell
-            ? content
-            : Row(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: _DesktopNav(index: _index, onChanged: _go),
+          bottomNavigationBar: mobileShell && !keyboardVisible
+              ? Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                  child: GlassContainer(
+                    radius: 24,
+                    blur: 20,
+                    color: Colors.white.withValues(alpha: .16),
+                    child: _MobileBottomNav(index: _index, onChanged: _go),
                   ),
-                  Expanded(child: content),
-                ],
-              ),
-        bottomNavigationBar: mobileShell && !keyboardVisible
-            ? Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                child: GlassContainer(
-                  radius: 24,
-                  blur: 20,
-                  color: Colors.white.withValues(alpha: .16),
-                  child: _MobileBottomNav(index: _index, onChanged: _go),
-                ),
-              )
-            : null,
+                )
+              : null,
+        ),
       ),
     );
   }

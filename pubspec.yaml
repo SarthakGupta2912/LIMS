@@ -13,14 +13,14 @@ dependencies:
   shared_preferences: ^2.5.5
   path_provider: ^2.1.6
   path: ^1.9.1
-  sqlite3: ^3.5.0
+  sqlite3: ^3.5.2
   sqlite3_flutter_libs: ^0.6.0+eol
-  file_picker: '>=10.3.7 <11.0.0'
-  google_fonts: ^8.2.0
+  file_picker: ^12.1.2
+  google_fonts: ^8.2.1
   pdf: ^3.13.0
-  liquid_glass_widgets: ^0.23.0
+  liquid_glass_widgets: ^1.1.0
   qr_flutter: ^4.1.0
-
+  open_filex: ^4.7.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

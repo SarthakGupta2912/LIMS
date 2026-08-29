@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -124,6 +126,7 @@ class RecentInvoice {
   final double total;
   final String status;
   final DateTime createdAt;
+  final String pdfPath;
   final String upiId;
   final String upiPayeeName;
   final String paymentNote;
@@ -134,10 +137,31 @@ class RecentInvoice {
     required this.total,
     required this.status,
     required this.createdAt,
+    required this.pdfPath,
     required this.upiId,
     required this.upiPayeeName,
     required this.paymentNote,
     required this.paymentMethod,
+  });
+}
+
+class InvoiceRecoveryData {
+  final String number;
+  final double total;
+  final String upiPayeeName;
+  final String upiId;
+  final String paymentMethod;
+  final InvoiceTemplateRecord template;
+  final List<CartLine> lines;
+
+  const InvoiceRecoveryData({
+    required this.number,
+    required this.total,
+    required this.upiPayeeName,
+    required this.upiId,
+    required this.paymentMethod,
+    required this.template,
+    required this.lines,
   });
 }
 
@@ -156,6 +180,7 @@ class AppDatabase {
 
   Database? _db;
   String? _dataDir;
+  String? _defaultInvoiceDir;
 
   Database get db {
     final database = _db;
@@ -169,7 +194,11 @@ class AppDatabase {
     return dir;
   }
 
-  String get defaultInvoiceDir => p.join(dataDir, 'invoices');
+  String get defaultInvoiceDir {
+    final dir = _defaultInvoiceDir;
+    if (dir == null) throw StateError('Database is not open');
+    return dir;
+  }
 
   Future<void> open() async {
     if (_db != null) return;
@@ -177,6 +206,18 @@ class AppDatabase {
     final appDir = Directory(p.join(supportDir.path, 'invoice_manager'));
     if (!await appDir.exists()) await appDir.create(recursive: true);
     _dataDir = appDir.path;
+    final resolvedDefault = await _resolveDefaultInvoiceDir(appDir.path);
+    try {
+      final defaultDir = Directory(resolvedDefault);
+      if (!await defaultDir.exists()) await defaultDir.create(recursive: true);
+      _defaultInvoiceDir = resolvedDefault;
+    } catch (_) {
+      _defaultInvoiceDir = p.join(appDir.path, 'invoices');
+      final fallbackDir = Directory(_defaultInvoiceDir!);
+      if (!await fallbackDir.exists()) {
+        await fallbackDir.create(recursive: true);
+      }
+    }
 
     _db = sqlite3.open(p.join(appDir.path, 'invoice_manager.db'));
     db.execute('PRAGMA foreign_keys = ON;');
@@ -200,7 +241,41 @@ class AppDatabase {
     _ensureColumn('invoices', 'upi_id', "TEXT NOT NULL DEFAULT ''");
     _ensureColumn('invoices', 'payment_note', "TEXT NOT NULL DEFAULT ''");
     _ensureColumn('invoices', 'payment_method', "TEXT NOT NULL DEFAULT 'upi'");
+    await _migrateLegacyDefaultInvoiceDir(appDir.path);
     await _migrateLegacyJsonOnce();
+  }
+
+  Future<void> _migrateLegacyDefaultInvoiceDir(String appDataDir) async {
+    final configured = setting('invoice_save_dir');
+    if (configured != null && configured.trim().isNotEmpty) return;
+    final legacyPath = p.join(appDataDir, 'invoices');
+    if (_samePath(legacyPath, defaultInvoiceDir)) return;
+    await _movePdfFiles(legacyPath, defaultInvoiceDir);
+  }
+
+  Future<String> _resolveDefaultInvoiceDir(String appDataDir) async {
+    if (defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS) {
+      try {
+        final downloadsDir = await _mobileDownloadsDirectory();
+        if (downloadsDir != null && await downloadsDir.exists()) {
+          return p.join(downloadsDir.path, 'LIMS');
+        }
+      } catch (_) {
+        // Some platforms/providers do not expose a downloads directory.
+      }
+    }
+    return p.join(appDataDir, 'invoices');
+  }
+
+  Future<Directory?> _mobileDownloadsDirectory() async {
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      final path = await const MethodChannel(
+        'lims/storage',
+      ).invokeMethod<String>('publicDownloadsPath');
+      return path == null ? null : Directory(path);
+    }
+    return getDownloadsDirectory();
   }
 
   void _createTables() {
@@ -380,6 +455,72 @@ CREATE INDEX IF NOT EXISTS idx_invoices_created ON invoices(created_at DESC);
     ['invoice_save_dir'],
   );
 
+  Future<int> updateInvoiceSaveDir(String? path) async {
+    final oldPath = invoiceSaveDir();
+    final newPath = path == null || path.trim().isEmpty
+        ? defaultInvoiceDir
+        : path.trim();
+    if (_samePath(oldPath, newPath)) return 0;
+
+    final newDir = Directory(newPath);
+    if (!await newDir.exists()) await newDir.create(recursive: true);
+    final moved = await _movePdfFiles(oldPath, newPath);
+
+    if (path == null || path.trim().isEmpty) {
+      resetInvoiceSaveDir();
+    } else {
+      setInvoiceSaveDir(newPath);
+    }
+    return moved;
+  }
+
+  Future<int> _movePdfFiles(String oldDirPath, String newDirPath) async {
+    final oldDir = Directory(oldDirPath);
+    if (!await oldDir.exists()) return 0;
+
+    var moved = 0;
+    await for (final entity in oldDir.list(followLinks: false)) {
+      if (entity is! File) continue;
+      if (p.extension(entity.path).toLowerCase() != '.pdf') continue;
+      final targetPath = await _availablePdfPath(
+        p.join(newDirPath, p.basename(entity.path)),
+      );
+      if (_samePath(entity.path, targetPath)) continue;
+      await _moveFile(entity, targetPath);
+      db.execute('UPDATE invoices SET pdf_path = ? WHERE pdf_path = ?', [
+        targetPath,
+        entity.path,
+      ]);
+      moved++;
+    }
+    return moved;
+  }
+
+  Future<String> _availablePdfPath(String path) async {
+    if (!await File(path).exists()) return path;
+    final dir = p.dirname(path);
+    final name = p.basenameWithoutExtension(path);
+    final ext = p.extension(path);
+    var index = 2;
+    while (true) {
+      final candidate = p.join(dir, '$name-$index$ext');
+      if (!await File(candidate).exists()) return candidate;
+      index++;
+    }
+  }
+
+  Future<void> _moveFile(File source, String targetPath) async {
+    try {
+      await source.rename(targetPath);
+    } on FileSystemException {
+      await source.copy(targetPath);
+      await source.delete();
+    }
+  }
+
+  bool _samePath(String a, String b) =>
+      p.normalize(a).toLowerCase() == p.normalize(b).toLowerCase();
+
   void setSetting(String key, String value) => db.execute(
     'INSERT OR REPLACE INTO app_settings(key, value) VALUES(?, ?)',
     [key, value],
@@ -389,14 +530,30 @@ CREATE INDEX IF NOT EXISTS idx_invoices_created ON invoices(created_at DESC);
     final term = '%${query.trim()}%';
     final rows = query.trim().isEmpty
         ? db.select('SELECT * FROM products ORDER BY updated_at DESC')
-        : db.select(
-            'SELECT * FROM products WHERE name LIKE ? OR CAST(id AS TEXT) LIKE ? ORDER BY name',
-            [term, term],
-          );
+        : db.select('SELECT * FROM products WHERE name LIKE ? ORDER BY name', [
+            term,
+          ]);
     return rows.map(ProductRecord.fromRow).toList();
   }
 
+  bool productNameExists(String name, {int? exceptId}) {
+    final normalized = name.trim().toLowerCase();
+    if (normalized.isEmpty) return false;
+    final rows = exceptId == null
+        ? db.select('SELECT id FROM products WHERE lower(name) = ? LIMIT 1', [
+            normalized,
+          ])
+        : db.select(
+            'SELECT id FROM products WHERE lower(name) = ? AND id != ? LIMIT 1',
+            [normalized, exceptId],
+          );
+    return rows.isNotEmpty;
+  }
+
   void saveProduct(ProductRecord product) {
+    if (productNameExists(product.name, exceptId: product.id)) {
+      throw ArgumentError('A product with this name already exists.');
+    }
     final now = DateTime.now().millisecondsSinceEpoch;
     if (product.id == null) {
       db.execute(
@@ -614,6 +771,66 @@ CREATE INDEX IF NOT EXISTS idx_invoices_created ON invoices(created_at DESC);
     );
   }
 
+  InvoiceRecoveryData? invoiceRecoveryData(String invoiceNumber) {
+    final invoiceRows = db.select(
+      'SELECT invoice_number, total, template_id, upi_payee_name, upi_id, payment_method FROM invoices WHERE invoice_number = ? LIMIT 1',
+      [invoiceNumber],
+    );
+    if (invoiceRows.isEmpty) return null;
+    final invoice = invoiceRows.first;
+    final templateRows = invoice['template_id'] == null
+        ? <Row>[]
+        : db.select('SELECT * FROM invoice_templates WHERE id = ? LIMIT 1', [
+            invoice['template_id'],
+          ]);
+    final template = templateRows.isNotEmpty
+        ? InvoiceTemplateRecord.fromRow(templateRows.first)
+        : selectedTemplate();
+    if (template == null) return null;
+
+    final invoiceIdRows = db.select(
+      'SELECT id FROM invoices WHERE invoice_number = ? LIMIT 1',
+      [invoiceNumber],
+    );
+    if (invoiceIdRows.isEmpty) return null;
+    final itemRows = db.select(
+      'SELECT product_id, product_name, quantity, unit_price, profit_total FROM invoice_items WHERE invoice_id = ? ORDER BY id',
+      [invoiceIdRows.first['id']],
+    );
+    final lines = itemRows.map((row) {
+      final quantity = row['quantity'] as int;
+      final unitPrice = (row['unit_price'] as num).toDouble();
+      final lineTotal = unitPrice * quantity;
+      final profitTotal = (row['profit_total'] as num).toDouble();
+      return CartLine(
+        product: ProductRecord(
+          id: row['product_id'] as int?,
+          name: row['product_name'] as String,
+          price: unitPrice,
+          profitPercent: lineTotal == 0 ? 0 : profitTotal / lineTotal * 100,
+        ),
+        quantity: quantity,
+      );
+    }).toList();
+    if (lines.isEmpty) return null;
+    return InvoiceRecoveryData(
+      number: invoiceNumber,
+      total: (invoice['total'] as num).toDouble(),
+      upiPayeeName: invoice['upi_payee_name'] as String,
+      upiId: invoice['upi_id'] as String,
+      paymentMethod: invoice['payment_method'] as String,
+      template: template,
+      lines: lines,
+    );
+  }
+
+  void updateInvoicePdfPath(String invoiceNumber, String path) {
+    db.execute('UPDATE invoices SET pdf_path = ? WHERE invoice_number = ?', [
+      path,
+      invoiceNumber,
+    ]);
+  }
+
   void recordPayment({
     required String invoiceNumber,
     required double amount,
@@ -680,7 +897,7 @@ CREATE INDEX IF NOT EXISTS idx_invoices_created ON invoices(created_at DESC);
                 .first['total']
             as int;
     final rows = db.select(
-      'SELECT invoice_number, total, status, created_at, upi_id, upi_payee_name, payment_note, payment_method FROM invoices $where ORDER BY $order LIMIT 10 OFFSET ?',
+      'SELECT invoice_number, total, status, created_at, pdf_path, upi_id, upi_payee_name, payment_note, payment_method FROM invoices $where ORDER BY $order LIMIT 10 OFFSET ?',
       [...args, page * 10],
     );
     return InvoicePageResult(
@@ -694,6 +911,7 @@ CREATE INDEX IF NOT EXISTS idx_invoices_created ON invoices(created_at DESC);
     total: (row['total'] as num).toDouble(),
     status: row['status'] as String,
     createdAt: DateTime.fromMillisecondsSinceEpoch(row['created_at'] as int),
+    pdfPath: row['pdf_path'] as String,
     upiId: row['upi_id'] as String,
     upiPayeeName: row['upi_payee_name'] as String,
     paymentNote: row['payment_note'] as String,
@@ -705,7 +923,7 @@ CREATE INDEX IF NOT EXISTS idx_invoices_created ON invoices(created_at DESC);
         ((db.select(sql).first['value'] as num?) ?? 0).toDouble();
     final recent = db
         .select(
-          "SELECT invoice_number, total, status, created_at, upi_id, upi_payee_name, payment_note, payment_method FROM invoices ORDER BY CASE WHEN status = 'payment_pending' THEN 0 ELSE 1 END, created_at DESC LIMIT 5",
+          "SELECT invoice_number, total, status, created_at, pdf_path, upi_id, upi_payee_name, payment_note, payment_method FROM invoices ORDER BY CASE WHEN status = 'payment_pending' THEN 0 ELSE 1 END, created_at DESC LIMIT 5",
         )
         .map(
           (row) => RecentInvoice(
@@ -715,6 +933,7 @@ CREATE INDEX IF NOT EXISTS idx_invoices_created ON invoices(created_at DESC);
             createdAt: DateTime.fromMillisecondsSinceEpoch(
               row['created_at'] as int,
             ),
+            pdfPath: row['pdf_path'] as String,
             upiId: row['upi_id'] as String,
             upiPayeeName: row['upi_payee_name'] as String,
             paymentNote: row['payment_note'] as String,

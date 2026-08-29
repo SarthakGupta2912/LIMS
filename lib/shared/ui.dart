@@ -246,11 +246,74 @@ void closeAppDialog<T>(BuildContext context, [T? result]) {
   });
 }
 
+Future<bool> showDeleteConfirmationDialog(
+  BuildContext context, {
+  required String title,
+  required String message,
+  String confirmLabel = 'Delete',
+}) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    barrierColor: Colors.black.withValues(alpha: .18),
+    builder: (context) => GlassDialog(
+      title: title,
+      maxWidth: Breakpoints.compact(context) ? double.infinity : 420,
+      actions: [
+        TextButton(
+          onPressed: () => closeAppDialog(context, false),
+          child: const CustomText(
+            'Cancel',
+            variant: CustomTextStyle.label,
+            color: Color(0xFFB8F4FF),
+          ),
+        ),
+        FilledButton.icon(
+          onPressed: () => closeAppDialog(context, true),
+          icon: const Icon(Icons.delete_outline),
+          label: CustomText(
+            confirmLabel,
+            color: const Color(0xFF062026),
+            variant: CustomTextStyle.label,
+          ),
+        ),
+      ],
+      child: CustomText(message, color: Colors.white.withValues(alpha: .78)),
+    ),
+  );
+  return confirmed == true;
+}
+
+bool validateFormAndScrollToFirstError(
+  GlobalKey<FormState> formKey,
+  List<GlobalKey<FormFieldState<String>>> fieldKeys,
+) {
+  final valid = formKey.currentState?.validate() ?? false;
+  if (valid) return true;
+
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    for (final key in fieldKeys) {
+      if (key.currentState?.hasError != true) continue;
+      final context = key.currentContext;
+      if (context == null) continue;
+      Scrollable.ensureVisible(
+        context,
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutCubic,
+        alignment: .12,
+      );
+      break;
+    }
+  });
+
+  return false;
+}
+
 class PageFrame extends StatelessWidget {
   final String title;
   final String subtitle;
   final List<Widget> actions;
   final Widget child;
+  final bool scrollable;
 
   const PageFrame({
     super.key,
@@ -258,6 +321,7 @@ class PageFrame extends StatelessWidget {
     this.subtitle = '',
     this.actions = const [],
     required this.child,
+    this.scrollable = false,
   });
 
   @override
@@ -265,16 +329,60 @@ class PageFrame extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final tight = constraints.maxWidth < 620;
-        final needsFrameScroll =
-            constraints.maxHeight.isFinite && constraints.maxHeight < 560;
         final frameHeight = constraints.maxHeight.isFinite
-            ? (needsFrameScroll ? 560.0 : constraints.maxHeight)
+            ? constraints.maxHeight
             : 560.0;
         final basePadding = Breakpoints.pagePadding(context);
         final padding = basePadding.add(
-          EdgeInsets.only(bottom: Breakpoints.compact(context) ? 92 : 0),
+          EdgeInsets.only(bottom: Breakpoints.mobileOrTablet ? 76 : 0),
         );
-        final frame = SizedBox(
+        final header = Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          alignment: WrapAlignment.spaceBetween,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            SizedBox(
+              width: tight
+                  ? double.infinity
+                  : constraints.maxWidth.clamp(280, 520).toDouble(),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  CustomText(title, variant: CustomTextStyle.display),
+                  if (subtitle.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    CustomText(
+                      subtitle,
+                      variant: CustomTextStyle.subtitle,
+                      color: Colors.white.withValues(alpha: .74),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            if (actions.isNotEmpty)
+              Wrap(spacing: 8, runSpacing: 8, children: actions),
+          ],
+        );
+        if (scrollable) {
+          return SingleChildScrollView(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                minHeight: constraints.maxHeight,
+                maxWidth: Breakpoints.maxWidth(context),
+              ),
+              child: Padding(
+                padding: padding,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [header, const SizedBox(height: 12), child],
+                ),
+              ),
+            ),
+          );
+        }
+        return SizedBox(
           height: frameHeight,
           child: Align(
             alignment: Alignment.topCenter,
@@ -287,38 +395,7 @@ class PageFrame extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Wrap(
-                      spacing: 12,
-                      runSpacing: 12,
-                      alignment: WrapAlignment.spaceBetween,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        SizedBox(
-                          width: tight
-                              ? double.infinity
-                              : constraints.maxWidth.clamp(280, 520).toDouble(),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              CustomText(
-                                title,
-                                variant: CustomTextStyle.display,
-                              ),
-                              if (subtitle.isNotEmpty) ...[
-                                const SizedBox(height: 4),
-                                CustomText(
-                                  subtitle,
-                                  variant: CustomTextStyle.subtitle,
-                                  color: Colors.white.withValues(alpha: .74),
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-                        if (actions.isNotEmpty)
-                          Wrap(spacing: 8, runSpacing: 8, children: actions),
-                      ],
-                    ),
+                    header,
                     const SizedBox(height: 20),
                     Expanded(child: child),
                   ],
@@ -327,7 +404,6 @@ class PageFrame extends StatelessWidget {
             ),
           ),
         );
-        return needsFrameScroll ? SingleChildScrollView(child: frame) : frame;
       },
     );
   }
@@ -338,6 +414,7 @@ class MetricCard extends StatelessWidget {
   final String value;
   final IconData icon;
   final Color color;
+  final bool compact;
 
   const MetricCard({
     super.key,
@@ -345,25 +422,26 @@ class MetricCard extends StatelessWidget {
     required this.value,
     required this.icon,
     required this.color,
+    this.compact = false,
   });
 
   @override
   Widget build(BuildContext context) {
     return GlassContainer(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.all(compact ? 10 : 16),
       blur: 14,
       child: LayoutBuilder(
         builder: (context, constraints) {
           final veryTight = constraints.maxWidth < 220;
           final iconBox = Container(
-            height: 44,
-            width: 44,
+            height: compact ? 34 : 44,
+            width: compact ? 34 : 44,
             decoration: BoxDecoration(
               color: color.withValues(alpha: .13),
               borderRadius: BorderRadius.circular(14),
               border: Border.all(color: Colors.white.withValues(alpha: .64)),
             ),
-            child: Icon(icon, color: color),
+            child: Icon(icon, color: color, size: compact ? 18 : null),
           );
           final texts = Column(
             mainAxisSize: MainAxisSize.min,
@@ -378,10 +456,12 @@ class MetricCard extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
-              const SizedBox(height: 4),
+              SizedBox(height: compact ? 2 : 4),
               CustomText(
                 value,
-                variant: CustomTextStyle.title,
+                variant: compact
+                    ? CustomTextStyle.subtitle
+                    : CustomTextStyle.title,
                 fontWeight: FontWeight.w900,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
@@ -394,7 +474,7 @@ class MetricCard extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 iconBox,
-                const SizedBox(height: 8),
+                SizedBox(height: compact ? 5 : 8),
                 Flexible(child: texts),
               ],
             );
@@ -403,7 +483,7 @@ class MetricCard extends StatelessWidget {
           return Row(
             children: [
               iconBox,
-              const SizedBox(width: 12),
+              SizedBox(width: compact ? 8 : 12),
               Expanded(child: texts),
             ],
           );

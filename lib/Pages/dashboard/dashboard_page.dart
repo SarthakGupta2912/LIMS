@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../../app/responsive.dart';
 import '../../core/app_database.dart';
 import '../billing/billing_page.dart';
+import '../invoices/invoices_page.dart';
 import '../../shared/ui.dart';
 
 class DashboardPage extends StatelessWidget {
@@ -23,6 +25,60 @@ class DashboardPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final stats = AppDatabase.instance.dashboardStats();
+    final landscape = Breakpoints.landscapeMobile(context);
+    final bodyChildren = [
+      _MetricsSection(stats: stats),
+      const SizedBox(height: 16),
+      GlassContainer(
+        padding: const EdgeInsets.all(18),
+        child: Row(
+          children: [
+            const Icon(Icons.percent, color: Color(0xFF7DEBFF)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: CustomText(
+                'Estimated profit margin',
+                variant: CustomTextStyle.label,
+                color: Colors.white.withValues(alpha: .72),
+              ),
+            ),
+            CustomText(
+              '${stats.profitMargin.toStringAsFixed(1)}%',
+              variant: CustomTextStyle.title,
+            ),
+          ],
+        ),
+      ),
+      const SizedBox(height: 16),
+      LayoutBuilder(
+        builder: (context, constraints) {
+          final twoColumns = constraints.maxWidth >= 900;
+          final recent = _RecentInvoices(
+            stats: stats,
+            onChanged: onChanged,
+            onInvoices: onInvoices,
+          );
+          final actions = _QuickActions(
+            onNewInvoice: onNewInvoice,
+            onAddProduct: onAddProduct,
+            onTemplate: onTemplate,
+          );
+          if (!twoColumns) {
+            return Column(
+              children: [recent, const SizedBox(height: 16), actions],
+            );
+          }
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(flex: 2, child: recent),
+              const SizedBox(width: 16),
+              Expanded(child: actions),
+            ],
+          );
+        },
+      ),
+    ];
     return PageFrame(
       title: 'Business Dashboard',
       subtitle:
@@ -47,116 +103,10 @@ class DashboardPage extends StatelessWidget {
           ),
         ),
       ],
-      child: ListView(
-        children: [
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final columns = constraints.maxWidth >= 1120
-                  ? 4
-                  : constraints.maxWidth >= 640
-                  ? 2
-                  : 1;
-              final cardWidth =
-                  (constraints.maxWidth - (12 * (columns - 1))) / columns;
-              final metrics = [
-                MetricCard(
-                  label: 'Revenue',
-                  value: money(stats.revenue),
-                  icon: Icons.trending_up,
-                  color: const Color(0xFF059669),
-                ),
-                MetricCard(
-                  label: 'Profit',
-                  value: money(stats.profit),
-                  icon: Icons.account_balance_wallet_outlined,
-                  color: const Color(0xFF0EA5E9),
-                ),
-                MetricCard(
-                  label: 'Pending',
-                  value: money(stats.pending),
-                  icon: Icons.schedule,
-                  color: const Color(0xFFD97706),
-                ),
-                MetricCard(
-                  label: 'Invoices',
-                  value: '${stats.invoices}',
-                  icon: Icons.description_outlined,
-                  color: const Color(0xFF2563EB),
-                ),
-                MetricCard(
-                  label: 'Products',
-                  value: '${stats.products}',
-                  icon: Icons.inventory_2_outlined,
-                  color: const Color(0xFF7C3AED),
-                ),
-              ];
-              return Wrap(
-                spacing: 12,
-                runSpacing: 12,
-                children: metrics
-                    .map(
-                      (metric) => SizedBox(
-                        width: cardWidth,
-                        height: columns == 1 ? 112 : 128,
-                        child: metric,
-                      ),
-                    )
-                    .toList(),
-              );
-            },
-          ),
-          const SizedBox(height: 16),
-          GlassContainer(
-            padding: const EdgeInsets.all(18),
-            child: Row(
-              children: [
-                const Icon(Icons.percent, color: Color(0xFF7DEBFF)),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: CustomText(
-                    'Estimated profit margin',
-                    variant: CustomTextStyle.label,
-                    color: Colors.white.withValues(alpha: .72),
-                  ),
-                ),
-                CustomText(
-                  '${stats.profitMargin.toStringAsFixed(1)}%',
-                  variant: CustomTextStyle.title,
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final twoColumns = constraints.maxWidth >= 900;
-              final recent = _RecentInvoices(
-                stats: stats,
-                onChanged: onChanged,
-                onInvoices: onInvoices,
-              );
-              final actions = _QuickActions(
-                onNewInvoice: onNewInvoice,
-                onAddProduct: onAddProduct,
-                onTemplate: onTemplate,
-              );
-              if (!twoColumns) {
-                return Column(
-                  children: [recent, const SizedBox(height: 16), actions],
-                );
-              }
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(flex: 2, child: recent),
-                  const SizedBox(width: 16),
-                  Expanded(child: actions),
-                ],
-              );
-            },
-          ),
-        ],
-      ),
+      scrollable: landscape,
+      child: landscape
+          ? Column(children: bodyChildren)
+          : ListView(children: bodyChildren),
     );
   }
 }
@@ -204,6 +154,7 @@ class _RecentInvoices extends StatelessWidget {
           else
             ...stats.recentInvoices.map(
               (invoice) => ListTile(
+                onTap: () => openInvoicePdf(context, invoice),
                 contentPadding: EdgeInsets.zero,
                 leading: const CircleAvatar(
                   child: Icon(Icons.receipt_long, size: 20),
@@ -271,16 +222,18 @@ class _QuickActions extends StatelessWidget {
         children: [
           const CustomText('Quick actions', variant: CustomTextStyle.title),
           const SizedBox(height: 12),
-          ...actions.map(
-            (item) => Padding(
-              padding: const EdgeInsets.only(bottom: 10),
+          ...actions.indexed.map(
+            (entry) => Padding(
+              padding: EdgeInsets.only(
+                bottom: entry.$1 == actions.length - 1 ? 0 : 10,
+              ),
               child: SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
-                  onPressed: item.$3,
-                  icon: Icon(item.$1),
+                  onPressed: entry.$2.$3,
+                  icon: Icon(entry.$2.$1),
                   label: CustomText(
-                    item.$2,
+                    entry.$2.$2,
                     variant: CustomTextStyle.label,
                     color: const Color(0xFFB8F4FF),
                   ),
@@ -289,6 +242,93 @@ class _QuickActions extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _MetricsSection extends StatelessWidget {
+  final DashboardStats stats;
+
+  const _MetricsSection({required this.stats});
+
+  @override
+  Widget build(BuildContext context) {
+    final metrics = [
+      (
+        'Revenue',
+        money(stats.revenue),
+        Icons.trending_up,
+        const Color(0xFF059669),
+      ),
+      (
+        'Profit',
+        money(stats.profit),
+        Icons.account_balance_wallet_outlined,
+        const Color(0xFF0EA5E9),
+      ),
+      (
+        'Pending',
+        money(stats.pending),
+        Icons.schedule,
+        const Color(0xFFD97706),
+      ),
+      (
+        'Invoices',
+        '${stats.invoices}',
+        Icons.description_outlined,
+        const Color(0xFF2563EB),
+      ),
+      (
+        'Products',
+        '${stats.products}',
+        Icons.inventory_2_outlined,
+        const Color(0xFF7C3AED),
+      ),
+    ];
+
+    return GlassContainer(
+      padding: const EdgeInsets.all(14),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final mobile = Breakpoints.mobileOrTablet;
+          final columns = mobile
+              ? 2
+              : constraints.maxWidth >= 1120
+              ? 4
+              : 2;
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const CustomText(
+                'Business overview',
+                variant: CustomTextStyle.title,
+              ),
+              const SizedBox(height: 12),
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: metrics.length,
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: columns,
+                  mainAxisSpacing: 10,
+                  crossAxisSpacing: 10,
+                  mainAxisExtent: mobile ? 104 : 116,
+                ),
+                itemBuilder: (context, index) {
+                  final metric = metrics[index];
+                  return MetricCard(
+                    label: metric.$1,
+                    value: metric.$2,
+                    icon: metric.$3,
+                    color: metric.$4,
+                    compact: mobile,
+                  );
+                },
+              ),
+            ],
+          );
+        },
       ),
     );
   }

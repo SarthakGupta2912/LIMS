@@ -52,7 +52,11 @@ class CustomText extends StatelessWidget {
       overflow: overflow,
       textScaler: TextScaler.noScaling,
       style: TextStyle(
-        fontSize: AppSize.text(context, base),
+        fontSize:
+            variant == CustomTextStyle.display ||
+                variant == CustomTextStyle.title
+            ? AppSize.heading(context, base)
+            : AppSize.text(context, base),
         fontWeight: weight,
         color: color ?? const Color(0xFFF7FBFF),
         height: 1.25,
@@ -107,7 +111,11 @@ class CustomSelectableText extends StatelessWidget {
       maxLines: maxLines,
       textScaler: TextScaler.noScaling,
       style: TextStyle(
-        fontSize: AppSize.text(context, base),
+        fontSize:
+            variant == CustomTextStyle.display ||
+                variant == CustomTextStyle.title
+            ? AppSize.heading(context, base)
+            : AppSize.text(context, base),
         fontWeight: weight,
         color: color ?? const Color(0xFFF7FBFF),
         height: 1.25,

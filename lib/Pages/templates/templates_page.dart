@@ -32,9 +32,17 @@ class TemplatesPageState extends State<TemplatesPage> {
     widget.onChanged();
   }
 
-  void _delete(InvoiceTemplateRecord template) {
+  Future<void> _delete(InvoiceTemplateRecord template) async {
     final id = template.id;
     if (id == null) return;
+    final confirmed = await showDeleteConfirmationDialog(
+      context,
+      title: 'Delete template?',
+      message:
+          'The template "${template.organizationName}" will be permanently deleted. Existing invoices will remain available.',
+      confirmLabel: 'Delete template',
+    );
+    if (!confirmed || !mounted) return;
     AppDatabase.instance.deleteTemplate(id);
     setState(() {});
     widget.onChanged();
@@ -43,6 +51,7 @@ class TemplatesPageState extends State<TemplatesPage> {
   @override
   Widget build(BuildContext context) {
     final templates = AppDatabase.instance.templates();
+    final landscape = Breakpoints.landscapeMobile(context);
     return PageFrame(
       title: 'Invoice Templates',
       subtitle: 'Store business branding, currency, notes, and invoice terms.',
@@ -57,6 +66,7 @@ class TemplatesPageState extends State<TemplatesPage> {
           ),
         ),
       ],
+      scrollable: landscape,
       child: templates.isEmpty
           ? EmptyPanel(
               icon: Icons.dashboard_customize_outlined,
@@ -76,6 +86,10 @@ class TemplatesPageState extends State<TemplatesPage> {
               builder: (context, constraints) {
                 final singleColumn = constraints.maxWidth < 620;
                 return GridView.extent(
+                  shrinkWrap: landscape,
+                  physics: landscape
+                      ? const NeverScrollableScrollPhysics()
+                      : const AlwaysScrollableScrollPhysics(),
                   maxCrossAxisExtent: singleColumn ? 620 : 400,
                   crossAxisSpacing: 14,
                   mainAxisSpacing: 14,
@@ -284,6 +298,9 @@ Future<bool?> showTemplateDialog(
   InvoiceTemplateRecord? template,
 ]) {
   final formKey = GlobalKey<FormState>();
+  final nameKey = GlobalKey<FormFieldState<String>>();
+  final upiPayeeNameKey = GlobalKey<FormFieldState<String>>();
+  final upiIdKey = GlobalKey<FormFieldState<String>>();
   final name = TextEditingController(text: template?.organizationName ?? '');
   final logo = TextEditingController(text: template?.logoPath ?? '');
   final currency = TextEditingController(text: template?.currency ?? 'Rs.');
@@ -298,6 +315,7 @@ Future<bool?> showTemplateDialog(
   );
   final upiId = TextEditingController(text: template?.upiId ?? '');
   var upiEnabled = template?.upiEnabled ?? false;
+  var showErrors = false;
   var accent = template?.accentColor ?? 0xFF2563EB;
   final sourceTemplates = AppDatabase.instance
       .templates()
@@ -322,7 +340,14 @@ Future<bool?> showTemplateDialog(
           ),
           FilledButton(
             onPressed: () {
-              if (!formKey.currentState!.validate()) return;
+              setDialogState(() => showErrors = true);
+              if (!validateFormAndScrollToFirstError(formKey, [
+                nameKey,
+                upiPayeeNameKey,
+                upiIdKey,
+              ])) {
+                return;
+              }
               AppDatabase.instance.saveTemplate(
                 InvoiceTemplateRecord(
                   id: template?.id,
@@ -355,10 +380,14 @@ Future<bool?> showTemplateDialog(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextFormField(
+                key: nameKey,
                 controller: name,
                 decoration: const InputDecoration(labelText: 'Business name'),
                 textInputAction: TextInputAction.next,
-                validator: _required,
+                onChanged: (_) {
+                  if (showErrors) setDialogState(() => showErrors = false);
+                },
+                validator: (value) => showErrors ? _required(value) : null,
               ),
               const SizedBox(height: 14),
               SwitchListTile.adaptive(
@@ -368,10 +397,17 @@ Future<bool?> showTemplateDialog(
                   variant: CustomTextStyle.label,
                 ),
                 value: upiEnabled,
-                onChanged: (value) => setDialogState(() => upiEnabled = value),
+                onChanged: (value) {
+                  setDialogState(() {
+                    upiEnabled = value;
+                    showErrors = false;
+                  });
+                },
               ),
-              if (upiEnabled && sourceTemplates.isNotEmpty)
+              if (upiEnabled && sourceTemplates.isNotEmpty) ...[
+                SizedBox(height: AppSize.space(context, 12)),
                 DropdownButtonFormField<int>(
+                  isExpanded: true,
                   decoration: const InputDecoration(
                     labelText: 'Copy UPI details from template',
                   ),
@@ -397,29 +433,47 @@ Future<bool?> showTemplateDialog(
                     });
                   },
                 ),
+              ],
               if (upiEnabled) ...[
-                const SizedBox(height: 10),
+                SizedBox(height: AppSize.space(context, 16)),
                 TextFormField(
+                  key: upiPayeeNameKey,
                   controller: upiPayeeName,
                   decoration: const InputDecoration(
                     labelText: 'UPI payee name',
                   ),
-                ),
-                const SizedBox(height: 10),
-                TextFormField(
-                  controller: upiId,
-                  decoration: const InputDecoration(
-                    labelText: 'UPI ID (optional)',
-                  ),
+                  onChanged: (_) {
+                    if (showErrors) setDialogState(() => showErrors = false);
+                  },
                   validator: (value) {
-                    if (value == null || value.trim().isEmpty) return null;
+                    if (!showErrors) return null;
+                    if (!upiEnabled) return null;
+                    if (value == null || value.trim().isEmpty) {
+                      return 'UPI payee name is required for online payments';
+                    }
+                    return null;
+                  },
+                ),
+                SizedBox(height: AppSize.space(context, 18)),
+                TextFormField(
+                  key: upiIdKey,
+                  controller: upiId,
+                  decoration: const InputDecoration(labelText: 'UPI ID'),
+                  onChanged: (_) {
+                    if (showErrors) setDialogState(() => showErrors = false);
+                  },
+                  validator: (value) {
+                    if (!showErrors) return null;
+                    if (value == null || value.trim().isEmpty) {
+                      return 'UPI ID is required for online payments';
+                    }
                     return value.trim().contains('@')
                         ? null
                         : 'Enter a valid UPI ID';
                   },
                 ),
               ],
-              const SizedBox(height: 14),
+              SizedBox(height: AppSize.space(context, 18)),
               TextFormField(
                 controller: currency,
                 decoration: const InputDecoration(labelText: 'Currency'),

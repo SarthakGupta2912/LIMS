@@ -6,9 +6,10 @@ Future<String?> pickFolderPath({
   required String title,
   required String pickText,
 }) async {
-  return FilePicker.platform.getDirectoryPath(
+  return FilePicker.getDirectoryPath(
     dialogTitle: title,
-    lockParentWindow: true,
+    windowsOptions: const WindowsOptions(lockParentWindow: true),
+    linuxOptions: const LinuxOptions(lockParentWindow: true),
   );
 }
 
@@ -17,11 +18,11 @@ Future<String?> pickImagePath({
   required String title,
   required String pickText,
 }) async {
-  final result = await FilePicker.platform.pickFiles(
+  final result = await FilePicker.pickFile(
     dialogTitle: title,
     type: FileType.image,
-    allowMultiple: false,
-    lockParentWindow: true,
+    windowsOptions: const WindowsOptions(lockParentWindow: true),
+    linuxOptions: const LinuxOptions(lockParentWindow: true),
   );
-  return result?.files.single.path;
+  return result?.path;
 }

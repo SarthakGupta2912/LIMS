@@ -1,5 +1,10 @@
-import 'package:flutter/material.dart';
+import 'dart:io';
 
+import 'package:flutter/material.dart';
+import 'package:open_filex/open_filex.dart';
+import 'package:path/path.dart' as p;
+
+import '../../app/responsive.dart';
 import '../../core/app_database.dart';
 import '../billing/billing_page.dart';
 import '../../shared/ui.dart';
@@ -34,6 +39,7 @@ class _InvoicesPageState extends State<InvoicesPage> {
       sort: _sort,
     );
     final pageCount = result.pageCount;
+    final landscape = Breakpoints.landscapeMobile(context);
     if (_page >= pageCount) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) setState(() => _page = pageCount - 1);
@@ -43,7 +49,9 @@ class _InvoicesPageState extends State<InvoicesPage> {
     return PageFrame(
       title: 'Invoices',
       subtitle: 'Search, review, and follow up on every invoice.',
+      scrollable: landscape,
       child: Column(
+        mainAxisSize: landscape ? MainAxisSize.min : MainAxisSize.max,
         children: [
           _InvoiceFilters(
             search: _search,
@@ -60,26 +68,43 @@ class _InvoicesPageState extends State<InvoicesPage> {
             }),
           ),
           const SizedBox(height: 14),
-          Expanded(
-            child: result.invoices.isEmpty
+          if (landscape)
+            result.invoices.isEmpty
                 ? const EmptyPanel(
                     icon: Icons.receipt_long_outlined,
                     title: 'No invoices found',
                     message: 'Try changing the search or filter.',
                   )
-                : LayoutBuilder(
-                    builder: (context, constraints) =>
-                        constraints.maxWidth < 760
-                        ? _InvoiceList(
-                            invoices: result.invoices,
-                            onChanged: widget.onChanged,
-                          )
-                        : _InvoiceTable(
-                            invoices: result.invoices,
-                            onChanged: widget.onChanged,
-                          ),
-                  ),
-          ),
+                : _InvoiceList(
+                    invoices: result.invoices,
+                    onChanged: widget.onChanged,
+                    onView: _openInvoicePdf,
+                    shrinkWrap: true,
+                  )
+          else
+            Expanded(
+              child: result.invoices.isEmpty
+                  ? const EmptyPanel(
+                      icon: Icons.receipt_long_outlined,
+                      title: 'No invoices found',
+                      message: 'Try changing the search or filter.',
+                    )
+                  : LayoutBuilder(
+                      builder: (context, constraints) =>
+                          Breakpoints.mobileOrTablet ||
+                              constraints.maxWidth < 760
+                          ? _InvoiceList(
+                              invoices: result.invoices,
+                              onChanged: widget.onChanged,
+                              onView: _openInvoicePdf,
+                            )
+                          : _InvoiceTable(
+                              invoices: result.invoices,
+                              onChanged: widget.onChanged,
+                              onView: _openInvoicePdf,
+                            ),
+                    ),
+            ),
           const SizedBox(height: 12),
           _InvoicePagination(
             page: _page,
@@ -93,6 +118,51 @@ class _InvoicesPageState extends State<InvoicesPage> {
         ],
       ),
     );
+  }
+
+  Future<void> _openInvoicePdf(RecentInvoice invoice) =>
+      openInvoicePdf(context, invoice);
+}
+
+Future<void> openInvoicePdf(BuildContext context, RecentInvoice invoice) async {
+  final path = await _ensureInvoicePdf(invoice);
+  if (path == null) {
+    if (!context.mounted) return;
+    showAppSnack(context, 'Could not recreate the invoice PDF');
+    return;
+  }
+  final result = await OpenFilex.open(path);
+  if (!context.mounted) return;
+  if (result.type == ResultType.noAppToOpen) {
+    showAppSnack(context, 'No PDF viewer is installed on this device');
+  } else if (result.type != ResultType.done) {
+    showAppSnack(context, 'Could not open the invoice PDF');
+  }
+}
+
+Future<String?> _ensureInvoicePdf(RecentInvoice invoice) async {
+  if (await File(invoice.pdfPath).exists()) return invoice.pdfPath;
+  final data = AppDatabase.instance.invoiceRecoveryData(invoice.number);
+  if (data == null) return null;
+
+  try {
+    final directory = await AppDatabase.instance.ensureInvoiceSaveDir();
+    final path = p.join(directory.path, '${data.number}.pdf');
+    final bytes = await buildInvoicePdf(
+      data.number,
+      data.template,
+      data.lines,
+      data.total,
+      upiPayeeName: data.paymentMethod == 'upi' ? data.upiPayeeName : '',
+      upiId: data.paymentMethod == 'upi' ? data.upiId : '',
+      paymentMethod: data.paymentMethod,
+    );
+    await File(path).writeAsBytes(bytes, flush: true);
+    AppDatabase.instance.updateInvoicePdfPath(data.number, path);
+    return path;
+  } catch (error) {
+    debugPrint('Invoice PDF recovery failed: $error');
+    return null;
   }
 }
 
@@ -165,11 +235,12 @@ class _InvoiceFilters extends StatelessWidget {
             children: [
               searchField,
               const SizedBox(height: 10),
-              ...controls.map(
-                (control) => Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: control,
-                ),
+              Row(
+                children: [
+                  Expanded(child: controls[0]),
+                  const SizedBox(width: 10),
+                  Expanded(child: controls[1]),
+                ],
               ),
             ],
           );
@@ -197,16 +268,30 @@ class _InvoiceFilters extends StatelessWidget {
 class _InvoiceList extends StatelessWidget {
   final List<RecentInvoice> invoices;
   final VoidCallback onChanged;
+  final Future<void> Function(RecentInvoice invoice) onView;
+  final bool shrinkWrap;
 
-  const _InvoiceList({required this.invoices, required this.onChanged});
+  const _InvoiceList({
+    required this.invoices,
+    required this.onChanged,
+    required this.onView,
+    this.shrinkWrap = false,
+  });
 
   @override
   Widget build(BuildContext context) {
     return ListView.separated(
+      shrinkWrap: shrinkWrap,
+      physics: shrinkWrap
+          ? const NeverScrollableScrollPhysics()
+          : const AlwaysScrollableScrollPhysics(),
       itemCount: invoices.length,
       separatorBuilder: (_, _) => const SizedBox(height: 10),
-      itemBuilder: (context, index) =>
-          _InvoiceCard(invoice: invoices[index], onChanged: onChanged),
+      itemBuilder: (context, index) => _InvoiceCard(
+        invoice: invoices[index],
+        onChanged: onChanged,
+        onView: () => onView(invoices[index]),
+      ),
     );
   }
 }
@@ -214,53 +299,75 @@ class _InvoiceList extends StatelessWidget {
 class _InvoiceCard extends StatelessWidget {
   final RecentInvoice invoice;
   final VoidCallback onChanged;
+  final VoidCallback onView;
 
-  const _InvoiceCard({required this.invoice, required this.onChanged});
+  const _InvoiceCard({
+    required this.invoice,
+    required this.onChanged,
+    required this.onView,
+  });
 
   @override
   Widget build(BuildContext context) {
     final pending = invoice.status == 'payment_pending';
     return GlassContainer(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      child: LayoutBuilder(
-        builder: (context, constraints) => Row(
-          children: [
-            CircleAvatar(
-              child: Icon(
-                pending ? Icons.schedule : Icons.check_circle_outline,
+      child: InkWell(
+        onTap: onView,
+        borderRadius: BorderRadius.circular(22),
+        child: LayoutBuilder(
+          builder: (context, constraints) => Row(
+            children: [
+              CircleAvatar(
+                child: Icon(
+                  pending ? Icons.schedule : Icons.check_circle_outline,
+                ),
               ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  CustomText(invoice.number, variant: CustomTextStyle.label),
-                  CustomText(
-                    '${invoice.createdAt.day}/${invoice.createdAt.month}/${invoice.createdAt.year}  |  ${invoice.paymentMethod}',
-                    variant: CustomTextStyle.caption,
-                    color: Colors.white.withValues(alpha: .7),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    CustomText(invoice.number, variant: CustomTextStyle.label),
+                    CustomText(
+                      '${invoice.createdAt.day}/${invoice.createdAt.month}/${invoice.createdAt.year}  |  ${invoice.paymentMethod}',
+                      variant: CustomTextStyle.caption,
+                      color: Colors.white.withValues(alpha: .7),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(width: 8),
-            if (constraints.maxWidth >= 330)
-              CustomText(money(invoice.total), variant: CustomTextStyle.label),
-            if (pending)
+              const SizedBox(width: 8),
+              if (constraints.maxWidth >= 330)
+                CustomText(
+                  money(invoice.total),
+                  variant: CustomTextStyle.label,
+                ),
               IconButton(
-                tooltip: 'Collect payment',
-                onPressed: () => _collect(context),
-                icon: const Icon(Icons.payments_outlined),
+                tooltip: 'View PDF',
+                onPressed: onView,
+                icon: const Icon(Icons.picture_as_pdf_outlined),
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints.tightFor(
                   width: 40,
                   height: 40,
                 ),
               ),
-          ],
+              if (pending)
+                IconButton(
+                  tooltip: 'Collect payment',
+                  onPressed: () => _collect(context),
+                  icon: const Icon(Icons.payments_outlined),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints.tightFor(
+                    width: 40,
+                    height: 40,
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -282,8 +389,13 @@ class _InvoiceCard extends StatelessWidget {
 class _InvoiceTable extends StatelessWidget {
   final List<RecentInvoice> invoices;
   final VoidCallback onChanged;
+  final Future<void> Function(RecentInvoice invoice) onView;
 
-  const _InvoiceTable({required this.invoices, required this.onChanged});
+  const _InvoiceTable({
+    required this.invoices,
+    required this.onChanged,
+    required this.onView,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -314,8 +426,16 @@ class _InvoiceTable extends StatelessWidget {
                   DataCell(Text(pending ? 'Pending' : 'Paid')),
                   DataCell(Text(money(invoice.total))),
                   DataCell(
-                    pending
-                        ? TextButton(
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          tooltip: 'View PDF',
+                          onPressed: () => onView(invoice),
+                          icon: const Icon(Icons.picture_as_pdf_outlined),
+                        ),
+                        if (pending)
+                          TextButton(
                             onPressed: () async {
                               await showPaymentCollectionDialog(
                                 context,
@@ -329,7 +449,10 @@ class _InvoiceTable extends StatelessWidget {
                             },
                             child: const Text('Collect'),
                           )
-                        : const Icon(Icons.check_circle_outline),
+                        else
+                          const Icon(Icons.check_circle_outline),
+                      ],
+                    ),
                   ),
                 ],
               );
