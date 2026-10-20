@@ -333,9 +333,7 @@ class PageFrame extends StatelessWidget {
             ? constraints.maxHeight
             : 560.0;
         final basePadding = Breakpoints.pagePadding(context);
-        final padding = basePadding.add(
-          EdgeInsets.only(bottom: Breakpoints.mobileOrTablet ? 76 : 0),
-        );
+        final padding = basePadding;
         final header = Wrap(
           spacing: 12,
           runSpacing: 12,

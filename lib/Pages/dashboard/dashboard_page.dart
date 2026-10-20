@@ -4,7 +4,9 @@ import '../../app/responsive.dart';
 import '../../core/app_database.dart';
 import '../billing/billing_page.dart';
 import '../invoices/invoices_page.dart';
+import '../orders/shop_orders_page.dart';
 import '../../shared/ui.dart';
+import '../../shared/help.dart';
 
 class DashboardPage extends StatelessWidget {
   final VoidCallback onNewInvoice;
@@ -12,6 +14,9 @@ class DashboardPage extends StatelessWidget {
   final VoidCallback onTemplate;
   final VoidCallback onChanged;
   final VoidCallback onInvoices;
+  final VoidCallback? onOrders;
+  final ValueChanged<LocalOrderRecord>? onOpenOrder;
+  final ShopkeeperMode mode;
 
   const DashboardPage({
     super.key,
@@ -20,30 +25,53 @@ class DashboardPage extends StatelessWidget {
     required this.onTemplate,
     required this.onChanged,
     required this.onInvoices,
+    this.mode = ShopkeeperMode.counterBilling,
+    this.onOrders,
+    this.onOpenOrder,
   });
 
   @override
   Widget build(BuildContext context) {
     final stats = AppDatabase.instance.dashboardStats();
+    final profile = AppDatabase.instance.activeProfile();
+    final orders = profile == null
+        ? const <LocalOrderRecord>[]
+        : AppDatabase.instance.ordersForProfile(profile.id);
+    final shop = profile == null
+        ? null
+        : AppDatabase.instance.shopForProfile(profile.id);
     final landscape = Breakpoints.landscapeMobile(context);
     final bodyChildren = [
-      _MetricsSection(stats: stats),
+      _MetricsSection(stats: stats, mode: mode),
       const SizedBox(height: 16),
       GlassContainer(
         padding: const EdgeInsets.all(18),
         child: Row(
           children: [
-            const Icon(Icons.percent, color: Color(0xFF7DEBFF)),
+            Icon(
+              mode == ShopkeeperMode.counterBilling
+                  ? Icons.percent
+                  : shop?.visible == true
+                  ? Icons.wifi_find
+                  : Icons.wifi_off_outlined,
+              color: const Color(0xFF7DEBFF),
+            ),
             const SizedBox(width: 12),
             Expanded(
               child: CustomText(
-                'Estimated profit margin',
+                mode == ShopkeeperMode.counterBilling
+                    ? 'Estimated profit margin'
+                    : 'Shop visibility',
                 variant: CustomTextStyle.label,
                 color: Colors.white.withValues(alpha: .72),
               ),
             ),
             CustomText(
-              '${stats.profitMargin.toStringAsFixed(1)}%',
+              mode == ShopkeeperMode.counterBilling
+                  ? '${stats.profitMargin.toStringAsFixed(1)}%'
+                  : shop?.visible == true
+                  ? 'Visible'
+                  : 'Hidden',
               variant: CustomTextStyle.title,
             ),
           ],
@@ -53,15 +81,25 @@ class DashboardPage extends StatelessWidget {
       LayoutBuilder(
         builder: (context, constraints) {
           final twoColumns = constraints.maxWidth >= 900;
-          final recent = _RecentInvoices(
-            stats: stats,
-            onChanged: onChanged,
-            onInvoices: onInvoices,
-          );
+          final recent = mode == ShopkeeperMode.counterBilling
+              ? _RecentInvoices(
+                  stats: stats,
+                  onChanged: onChanged,
+                  onInvoices: onInvoices,
+                )
+              : RecentOrdersPanel(
+                  profile: profile!,
+                  orders: orders,
+                  onOrders: onOrders,
+                  onChanged: onChanged,
+                  onOpenOrder: onOpenOrder,
+                );
           final actions = _QuickActions(
             onNewInvoice: onNewInvoice,
             onAddProduct: onAddProduct,
             onTemplate: onTemplate,
+            onOrders: onOrders,
+            mode: mode,
           );
           if (!twoColumns) {
             return Column(
@@ -80,15 +118,31 @@ class DashboardPage extends StatelessWidget {
       ),
     ];
     return PageFrame(
-      title: 'Business Dashboard',
-      subtitle:
-          'Track products, invoices, revenue, and daily billing activity.',
+      title: mode == ShopkeeperMode.counterBilling
+          ? 'Counter Billing'
+          : 'Nearby Orders',
+      subtitle: mode == ShopkeeperMode.counterBilling
+          ? 'Create invoices and manage walk-in customer payments.'
+          : 'Receive, prepare, and manage orders from nearby customers.',
       actions: [
+        IconButton.filledTonal(
+          tooltip: 'How to use this app',
+          onPressed: () => showRoleHelp(context, AppRole.shopkeeper),
+          icon: const Icon(Icons.help_outline),
+        ),
         FilledButton.icon(
-          onPressed: onNewInvoice,
-          icon: const Icon(Icons.receipt_long),
-          label: const CustomText(
-            'New invoice',
+          onPressed: mode == ShopkeeperMode.counterBilling
+              ? onNewInvoice
+              : onOrders,
+          icon: Icon(
+            mode == ShopkeeperMode.counterBilling
+                ? Icons.receipt_long
+                : Icons.room_service_outlined,
+          ),
+          label: CustomText(
+            mode == ShopkeeperMode.counterBilling
+                ? 'New invoice'
+                : 'View orders',
             color: Color(0xFF062026),
             variant: CustomTextStyle.label,
           ),
@@ -197,23 +251,144 @@ class _RecentInvoices extends StatelessWidget {
   }
 }
 
+class RecentOrdersPanel extends StatelessWidget {
+  final LocalProfile profile;
+  final List<LocalOrderRecord> orders;
+  final VoidCallback? onOrders;
+  final VoidCallback onChanged;
+  final ValueChanged<LocalOrderRecord>? onOpenOrder;
+
+  const RecentOrdersPanel({
+    super.key,
+    required this.profile,
+    required this.orders,
+    required this.onOrders,
+    required this.onChanged,
+    this.onOpenOrder,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final recent = orders.take(5).toList();
+    return GlassContainer(
+      padding: const EdgeInsets.all(18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Expanded(
+                child: CustomText(
+                  'Recent orders',
+                  variant: CustomTextStyle.title,
+                ),
+              ),
+              TextButton.icon(
+                onPressed: onOrders,
+                icon: const Icon(Icons.arrow_forward, size: 18),
+                label: const Text('View all'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (recent.isEmpty)
+            const EmptyPanel(
+              icon: Icons.room_service_outlined,
+              title: 'No nearby orders yet',
+              message: 'New customer orders will appear here automatically.',
+            )
+          else
+            ...recent.map(
+              (order) => ListTile(
+                onTap: () {
+                  final openOrder = onOpenOrder;
+                  if (openOrder != null) {
+                    openOrder(order);
+                  } else {
+                    showShopOrderDialog(
+                      context,
+                      profile: profile,
+                      initialOrder: order,
+                      onChanged: onChanged,
+                    );
+                  }
+                },
+                contentPadding: EdgeInsets.zero,
+                leading: CircleAvatar(child: Icon(_orderIcon(order.status))),
+                title: CustomText(
+                  order.customerName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: CustomText(
+                  _orderStatus(order.status),
+                  variant: CustomTextStyle.caption,
+                  color: Colors.white.withValues(alpha: .72),
+                ),
+                trailing: CustomText(
+                  money(order.total),
+                  variant: CustomTextStyle.label,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+String _orderStatus(String status) => switch (status) {
+  'pending' => 'New',
+  'accepted' => 'Accepted',
+  'preparing' => 'Preparing',
+  'ready_for_pickup' => 'Ready for pickup',
+  'completed' => 'Completed',
+  'rejected' => 'Rejected',
+  'cancelled' => 'Cancelled',
+  _ => status,
+};
+
+IconData _orderIcon(String status) => switch (status) {
+  'pending' => Icons.notifications_active_outlined,
+  'accepted' || 'preparing' => Icons.restaurant_outlined,
+  'ready_for_pickup' => Icons.shopping_bag_outlined,
+  'completed' => Icons.task_alt,
+  'rejected' || 'cancelled' => Icons.cancel_outlined,
+  _ => Icons.receipt_long_outlined,
+};
+
 class _QuickActions extends StatelessWidget {
   final VoidCallback onNewInvoice;
   final VoidCallback onAddProduct;
   final VoidCallback onTemplate;
+  final VoidCallback? onOrders;
+  final ShopkeeperMode mode;
 
   const _QuickActions({
     required this.onNewInvoice,
     required this.onAddProduct,
     required this.onTemplate,
+    this.onOrders,
+    this.mode = ShopkeeperMode.counterBilling,
   });
 
   @override
   Widget build(BuildContext context) {
-    final actions = [
-      (Icons.point_of_sale, 'Start billing', onNewInvoice),
+    final actions = <(IconData, String, VoidCallback?)>[
+      (
+        mode == ShopkeeperMode.counterBilling
+            ? Icons.point_of_sale
+            : Icons.room_service_outlined,
+        mode == ShopkeeperMode.counterBilling
+            ? 'Start counter billing'
+            : 'Open nearby orders',
+        mode == ShopkeeperMode.counterBilling ? onNewInvoice : onOrders,
+      ),
       (Icons.inventory_2_outlined, 'Add product', onAddProduct),
-      (Icons.dashboard_customize_outlined, 'Invoice template', onTemplate),
+      if (mode == ShopkeeperMode.counterBilling)
+        (Icons.dashboard_customize_outlined, 'Invoice templates', onTemplate),
+      if (mode == ShopkeeperMode.counterBilling && onOrders != null)
+        (Icons.room_service_outlined, 'Nearby orders', onOrders!),
     ];
     return GlassContainer(
       padding: const EdgeInsets.all(18),
@@ -249,43 +424,81 @@ class _QuickActions extends StatelessWidget {
 
 class _MetricsSection extends StatelessWidget {
   final DashboardStats stats;
+  final ShopkeeperMode mode;
 
-  const _MetricsSection({required this.stats});
+  const _MetricsSection({required this.stats, required this.mode});
 
   @override
   Widget build(BuildContext context) {
-    final metrics = [
-      (
-        'Revenue',
-        money(stats.revenue),
-        Icons.trending_up,
-        const Color(0xFF059669),
-      ),
-      (
-        'Profit',
-        money(stats.profit),
-        Icons.account_balance_wallet_outlined,
-        const Color(0xFF0EA5E9),
-      ),
-      (
-        'Pending',
-        money(stats.pending),
-        Icons.schedule,
-        const Color(0xFFD97706),
-      ),
-      (
-        'Invoices',
-        '${stats.invoices}',
-        Icons.description_outlined,
-        const Color(0xFF2563EB),
-      ),
-      (
-        'Products',
-        '${stats.products}',
-        Icons.inventory_2_outlined,
-        const Color(0xFF7C3AED),
-      ),
-    ];
+    final profile = AppDatabase.instance.activeProfile();
+    final orders = profile == null
+        ? const <LocalOrderRecord>[]
+        : AppDatabase.instance.ordersForProfile(profile.id);
+    final metrics = mode == ShopkeeperMode.counterBilling
+        ? [
+            (
+              'Revenue',
+              money(stats.revenue),
+              Icons.trending_up,
+              const Color(0xFF059669),
+            ),
+            (
+              'Profit',
+              money(stats.profit),
+              Icons.account_balance_wallet_outlined,
+              const Color(0xFF0EA5E9),
+            ),
+            (
+              'Pending',
+              money(stats.pending),
+              Icons.schedule,
+              const Color(0xFFD97706),
+            ),
+            (
+              'Invoices',
+              '${stats.invoices}',
+              Icons.description_outlined,
+              const Color(0xFF2563EB),
+            ),
+            (
+              'Products',
+              '${stats.products}',
+              Icons.inventory_2_outlined,
+              const Color(0xFF7C3AED),
+            ),
+          ]
+        : [
+            (
+              'New orders',
+              '${orders.where((order) => order.status == 'pending').length}',
+              Icons.notifications_active_outlined,
+              const Color(0xFFD97706),
+            ),
+            (
+              'Active',
+              '${orders.where((order) => const ['accepted', 'preparing'].contains(order.status)).length}',
+              Icons.restaurant_outlined,
+              const Color(0xFF0EA5E9),
+            ),
+            (
+              'Ready',
+              '${orders.where((order) => order.status == 'ready_for_pickup').length}',
+              Icons.shopping_bag_outlined,
+              const Color(0xFF059669),
+            ),
+            (
+              'Completed',
+              '${orders.where((order) => order.status == 'completed').length}',
+              Icons.task_alt,
+              const Color(0xFF2563EB),
+            ),
+            (
+              'Products',
+              '${stats.products}',
+              Icons.inventory_2_outlined,
+              const Color(0xFF7C3AED),
+            ),
+          ];
 
     return GlassContainer(
       padding: const EdgeInsets.all(14),
@@ -300,8 +513,10 @@ class _MetricsSection extends StatelessWidget {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const CustomText(
-                'Business overview',
+              CustomText(
+                mode == ShopkeeperMode.counterBilling
+                    ? 'Billing overview'
+                    : 'Shop overview',
                 variant: CustomTextStyle.title,
               ),
               const SizedBox(height: 12),

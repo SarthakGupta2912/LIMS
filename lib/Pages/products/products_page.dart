@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../../app/responsive.dart';
 import '../../core/app_database.dart';
+import '../../core/nearby_connection_service.dart';
 import '../../shared/ui.dart';
 
 class ProductsPage extends StatefulWidget {
@@ -28,6 +29,7 @@ class ProductsPageState extends State<ProductsPage> {
     if (saved == true) {
       setState(_selected.clear);
       widget.onChanged();
+      await NearbyConnectionService.instance.refreshAdvertisingAndCatalog();
     }
   }
 
@@ -44,8 +46,14 @@ class ProductsPageState extends State<ProductsPage> {
     );
     if (!confirmed || !mounted) return;
     AppDatabase.instance.deleteProducts(_selected);
+    final profile = AppDatabase.instance.activeProfile();
+    if (profile?.role == AppRole.shopkeeper) {
+      AppDatabase.instance.incrementCatalogRevision(profile!.id);
+    }
     setState(_selected.clear);
     widget.onChanged();
+    await NearbyConnectionService.instance.refreshAdvertisingAndCatalog();
+    if (!mounted) return;
     showAppSnack(
       context,
       count == 1 ? 'Deleted product' : 'Deleted selected products',
@@ -298,6 +306,10 @@ Future<bool?> showProductDialog(
     text: product?.profitPercent.toString() ?? '0',
   );
   final stock = TextEditingController(text: '${product?.stockQuantity ?? 0}');
+  final description = TextEditingController(text: product?.description ?? '');
+  final category = TextEditingController(text: product?.category ?? 'General');
+  var isAvailable = product?.isAvailable ?? true;
+  var isPublished = product?.isPublished ?? false;
   var showErrors = false;
 
   final dialog = showDialog<bool>(
@@ -333,6 +345,13 @@ Future<bool?> showProductDialog(
                   price: double.parse(price.text),
                   profitPercent: double.tryParse(profit.text) ?? 0,
                   stockQuantity: int.tryParse(stock.text) ?? 0,
+                  description: description.text.trim(),
+                  category: category.text.trim().isEmpty
+                      ? 'General'
+                      : category.text.trim(),
+                  imagePath: product?.imagePath,
+                  isAvailable: isAvailable,
+                  isPublished: isPublished,
                 ),
               );
               closeAppDialog(context, true);
@@ -421,6 +440,35 @@ Future<bool?> showProductDialog(
                 keyboardType: TextInputType.number,
                 textInputAction: TextInputAction.done,
                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: category,
+                decoration: const InputDecoration(
+                  labelText: 'Customer menu category',
+                ),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: description,
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'Customer description (optional)',
+                ),
+              ),
+              const SizedBox(height: 8),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: isPublished,
+                title: const Text('Visible to customers'),
+                subtitle: const Text('Include this item in the nearby menu'),
+                onChanged: (value) => setDialogState(() => isPublished = value),
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: isAvailable,
+                title: const Text('Available now'),
+                onChanged: (value) => setDialogState(() => isAvailable = value),
               ),
             ],
           ),

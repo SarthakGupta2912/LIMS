@@ -1,0 +1,17 @@
+# Local Wi-Fi Direct implementation of flutter_nearby_connections_plus 1.2.2.
+name: flutter_nearby_connections_plus
+description: Pure Wi-Fi Direct nearby connections for LIMS.
+version: 1.2.2
+publish_to: none
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+  flutter: '>=3.22.0'
+dependencies:
+  flutter:
+    sdk: flutter
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.nankai.flutter_nearby_connections
+        pluginClass: FlutterNearbyConnectionsPlugin

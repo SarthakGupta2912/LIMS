@@ -1,10 +1,18 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../core/app_database.dart';
-import '../pages/billing/billing_page.dart';
+import '../core/nearby_connection_service.dart';
+import '../core/notification_service.dart';
+import '../pages/Billing/billing_page.dart';
+import '../pages/customer/customer_order_detail_page.dart';
+import '../pages/customer/customer_pages.dart';
 import '../pages/dashboard/dashboard_page.dart';
 import '../pages/invoices/invoices_page.dart';
+import '../pages/orders/shop_orders_page.dart';
 import '../pages/products/products_page.dart';
+import '../pages/profiles/profile_selection_page.dart';
 import '../pages/settings/settings_page.dart';
 import '../pages/templates/templates_page.dart';
 import '../shared/ui.dart';
@@ -18,40 +26,112 @@ class InvoiceApp extends StatelessWidget {
   const InvoiceApp({super.key, this.initialize});
 
   @override
+  Widget build(BuildContext context) => MaterialApp(
+    debugShowCheckedModeBanner: false,
+    title: 'LIMS',
+    theme: buildAppTheme(),
+    builder: (context, child) => MediaQuery(
+      data: MediaQuery.of(context).copyWith(textScaler: TextScaler.noScaling),
+      child: child ?? const SizedBox.shrink(),
+    ),
+    home: SplashScreen(
+      initialize: initialize ?? AppDatabase.instance.open,
+      child: const _ProfileGate(),
+    ),
+  );
+}
+
+class _ProfileGate extends StatefulWidget {
+  const _ProfileGate();
+
+  @override
+  State<_ProfileGate> createState() => _ProfileGateState();
+}
+
+class _ProfileGateState extends State<_ProfileGate> {
+  LocalProfile? _profile;
+
+  @override
+  void initState() {
+    super.initState();
+    _profile = AppDatabase.instance.activeProfile();
+  }
+
+  Future<void> _leaveProfile() async {
+    await NearbyConnectionService.instance.disconnect();
+    AppDatabase.instance.logout();
+    if (mounted) setState(() => _profile = null);
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'LIMS',
-      theme: buildAppTheme(),
-      builder: (context, child) {
-        final mediaQuery = MediaQuery.of(context);
-        return MediaQuery(
-          data: mediaQuery.copyWith(textScaler: TextScaler.noScaling),
-          child: child ?? const SizedBox.shrink(),
-        );
-      },
-      home: SplashScreen(
-        initialize: initialize ?? AppDatabase.instance.open,
-        child: const AppShell(),
-      ),
-    );
+    final profile = _profile;
+    if (profile == null) {
+      return ProfileSelectionPage(
+        onSelected: (value) => setState(() => _profile = value),
+      );
+    }
+    return profile.role == AppRole.customer
+        ? CustomerShell(profile: profile, onLeaveProfile: _leaveProfile)
+        : AppShell(profile: profile, onLeaveProfile: _leaveProfile);
   }
 }
 
 class AppShell extends StatefulWidget {
-  const AppShell({super.key});
+  final LocalProfile profile;
+  final VoidCallback onLeaveProfile;
+
+  const AppShell({
+    super.key,
+    required this.profile,
+    required this.onLeaveProfile,
+  });
 
   @override
   State<AppShell> createState() => _AppShellState();
 }
 
-class _AppShellState extends State<AppShell> {
+class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   final _productsKey = GlobalKey<ProductsPageState>();
   final _templatesKey = GlobalKey<TemplatesPageState>();
   final List<int> _history = [];
   int _index = 0;
+  StreamSubscription<String>? _notificationNav;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _notificationNav = NotificationService.instance.onNavigateToOrder.listen(
+      (_) => _go(5),
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (NotificationService.instance.consumePendingOrderId() != null) {
+        _go(5);
+      }
+      NearbyConnectionService.instance.resumeForForeground(widget.profile);
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      NearbyConnectionService.instance.resumeForForeground(widget.profile);
+    } else {
+      NearbyConnectionService.instance.pauseForBackground();
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _notificationNav?.cancel();
+    super.dispose();
+  }
 
   void _refresh() => setState(() {});
+
   void _go(int index) {
     if (index == _index) return;
     setState(() {
@@ -63,14 +143,12 @@ class _AppShellState extends State<AppShell> {
     });
   }
 
-  void _goBack() {
-    if (_history.isEmpty) return;
-    setState(() => _index = _history.removeLast());
+  void _back() {
+    if (_history.isNotEmpty) setState(() => _index = _history.removeLast());
   }
 
   void _addProduct() {
     _go(1);
-    if (!mounted) return;
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => _productsKey.currentState?.openProductDialog(),
     );
@@ -78,7 +156,6 @@ class _AppShellState extends State<AppShell> {
 
   void _addTemplate() {
     _go(4);
-    if (!mounted) return;
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => _templatesKey.currentState?.openTemplateDialog(),
     );
@@ -87,17 +164,18 @@ class _AppShellState extends State<AppShell> {
   @override
   Widget build(BuildContext context) {
     final compact = Breakpoints.compact(context);
-    final mobileShell = compact || Breakpoints.mobileOrTablet;
-    final keyboardVisible = MediaQuery.viewInsetsOf(context).bottom > 0;
+    final mobile = compact || Breakpoints.mobileOrTablet;
+    final shop = AppDatabase.instance.shopForProfile(widget.profile.id);
+    final mode = shop?.mode ?? ShopkeeperMode.counterBilling;
     final pages = [
       DashboardPage(
-        onNewInvoice: () {
-          _go(2);
-        },
+        mode: mode,
+        onNewInvoice: () => _go(2),
         onAddProduct: _addProduct,
         onTemplate: _addTemplate,
         onChanged: _refresh,
         onInvoices: () => _go(3),
+        onOrders: () => _go(5),
       ),
       ProductsPage(key: _productsKey, onChanged: _refresh),
       BillingPage(
@@ -107,43 +185,28 @@ class _AppShellState extends State<AppShell> {
       ),
       InvoicesPage(onChanged: _refresh),
       TemplatesPage(key: _templatesKey, onChanged: _refresh),
-      SettingsPage(onChanged: _refresh),
+      ShopOrdersPage(profile: widget.profile),
+      SettingsPage(onChanged: _refresh, onLeaveProfile: widget.onLeaveProfile),
     ];
-    final content = mobileShell
-        ? _StablePageViewport(index: _index, pages: pages)
-        : RepaintBoundary(child: pages[_index]);
-
+    final content = mobile
+        ? IndexedStack(index: _index, children: pages)
+        : Row(
+            children: [
+              _Nav(index: _index, mode: mode, onChanged: _go),
+              Expanded(child: pages[_index]),
+            ],
+          );
     return PopScope(
       canPop: _history.isEmpty,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) _goBack();
+        if (!didPop) _back();
       },
       child: GlassBackground(
         child: Scaffold(
-          extendBody: true,
-          resizeToAvoidBottomInset: false,
           backgroundColor: Colors.transparent,
-          body: mobileShell
-              ? SafeArea(top: true, bottom: false, child: content)
-              : Row(
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: _DesktopNav(index: _index, onChanged: _go),
-                    ),
-                    Expanded(child: content),
-                  ],
-                ),
-          bottomNavigationBar: mobileShell && !keyboardVisible
-              ? Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                  child: GlassContainer(
-                    radius: 24,
-                    blur: 20,
-                    color: Colors.white.withValues(alpha: .16),
-                    child: _MobileBottomNav(index: _index, onChanged: _go),
-                  ),
-                )
+          body: SafeArea(top: true, bottom: false, child: content),
+          bottomNavigationBar: mobile
+              ? _BottomNav(index: _index, mode: mode, onChanged: _go)
               : null,
         ),
       ),
@@ -151,294 +214,232 @@ class _AppShellState extends State<AppShell> {
   }
 }
 
-class _StablePageViewport extends StatelessWidget {
+class _Nav extends StatelessWidget {
   final int index;
-  final List<Widget> pages;
-
-  const _StablePageViewport({required this.index, required this.pages});
-
-  @override
-  Widget build(BuildContext context) {
-    return RepaintBoundary(
-      child: IndexedStack(
-        index: index,
-        children: pages.map((page) => RepaintBoundary(child: page)).toList(),
-      ),
-    );
-  }
-}
-
-class _MobileBottomNav extends StatelessWidget {
-  final int index;
+  final ShopkeeperMode mode;
   final ValueChanged<int> onChanged;
 
-  const _MobileBottomNav({required this.index, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    final items = const [
-      (0, Icons.space_dashboard_outlined, Icons.space_dashboard, 'Home'),
-      (1, Icons.inventory_2_outlined, Icons.inventory_2, 'Products'),
-      (2, Icons.point_of_sale_outlined, Icons.point_of_sale, 'Billing'),
-      (
-        4,
-        Icons.dashboard_customize_outlined,
-        Icons.dashboard_customize,
-        'Templates',
-      ),
-      (5, Icons.settings_outlined, Icons.settings, 'Settings'),
-    ];
-
-    return SafeArea(
-      top: false,
-      minimum: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
-      child: SizedBox(
-        height: AppSize.space(context, 64),
-        child: Row(
-          children: items.indexed.map((entry) {
-            final selected = entry.$2.$1 == index;
-            final item = entry.$2;
-            return Expanded(
-              child: _MobileBottomNavItem(
-                icon: item.$2,
-                selectedIcon: item.$3,
-                label: item.$4,
-                selected: selected,
-                onTap: () => onChanged(item.$1),
-              ),
-            );
-          }).toList(),
-        ),
-      ),
-    );
-  }
-}
-
-class _MobileBottomNavItem extends StatelessWidget {
-  final IconData icon;
-  final IconData selectedIcon;
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _MobileBottomNavItem({
-    required this.icon,
-    required this.selectedIcon,
-    required this.label,
-    required this.selected,
-    required this.onTap,
+  const _Nav({
+    required this.index,
+    required this.mode,
+    required this.onChanged,
   });
 
   @override
   Widget build(BuildContext context) {
-    final color = selected
-        ? Theme.of(context).colorScheme.primary
-        : Colors.white.withValues(alpha: .72);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 3),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(22),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOutCubic,
-          height: double.infinity,
-          decoration: BoxDecoration(
-            color: selected
-                ? Theme.of(context).colorScheme.primary.withValues(alpha: .14)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(22),
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                selected ? selectedIcon : icon,
-                color: color,
-                size: AppSize.icon(context, 24),
-              ),
-              SizedBox(height: AppSize.space(context, 3)),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 2),
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: CustomText(
-                    label,
-                    variant: CustomTextStyle.caption,
-                    color: color,
-                    fontWeight: selected ? FontWeight.w800 : FontWeight.w700,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _DesktopNav extends StatelessWidget {
-  final int index;
-  final ValueChanged<int> onChanged;
-
-  const _DesktopNav({required this.index, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    final narrow = Breakpoints.narrowDesktop(context);
-    final items = const [
-      (Icons.space_dashboard_outlined, Icons.space_dashboard, 'Dashboard'),
-      (Icons.inventory_2_outlined, Icons.inventory_2, 'Products'),
-      (Icons.point_of_sale_outlined, Icons.point_of_sale, 'Billing'),
-      (Icons.receipt_long_outlined, Icons.receipt_long, 'Invoices'),
-      (
-        Icons.dashboard_customize_outlined,
-        Icons.dashboard_customize,
-        'Templates',
-      ),
-      (Icons.settings_outlined, Icons.settings, 'Settings'),
+    final items = <(int, IconData, String)>[
+      (0, Icons.space_dashboard_outlined, 'Dashboard'),
+      (1, Icons.inventory_2_outlined, 'Products'),
+      if (mode == ShopkeeperMode.counterBilling)
+        (2, Icons.point_of_sale_outlined, 'Billing'),
+      if (mode == ShopkeeperMode.counterBilling)
+        (3, Icons.receipt_long_outlined, 'Invoices'),
+      if (mode == ShopkeeperMode.counterBilling)
+        (4, Icons.dashboard_customize_outlined, 'Templates'),
+      (5, Icons.receipt_long_outlined, 'Orders'),
+      (6, Icons.settings_outlined, 'Settings'),
     ];
     return SizedBox(
-      width: narrow ? 88 : 240,
+      width: 220,
       child: GlassContainer(
-        radius: 28,
-        blur: 22,
-        color: Colors.white.withValues(alpha: .16),
-        child: SafeArea(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final minHeight =
-                  constraints.maxHeight.isFinite && constraints.maxHeight < 520
-                  ? 520.0
-                  : constraints.maxHeight;
-              return SingleChildScrollView(
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(minHeight: minHeight),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Padding(
-                        padding: EdgeInsets.fromLTRB(
-                          narrow ? 14 : 20,
-                          22,
-                          narrow ? 14 : 20,
-                          14,
-                        ),
-                        child: Row(
-                          children: [
-                            const CircleAvatar(child: Icon(Icons.receipt_long)),
-                            if (!narrow) ...[
-                              const SizedBox(width: 12),
-                              const Expanded(
-                                child: CustomText(
-                                  'LIMS',
-                                  variant: CustomTextStyle.title,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      ...items.indexed.map(
-                        (item) => _DesktopNavItem(
-                          icon: item.$2.$1,
-                          selectedIcon: item.$2.$2,
-                          label: item.$2.$3,
-                          selected: index == item.$1,
-                          narrow: narrow,
-                          onTap: () => onChanged(item.$1),
-                        ),
-                      ),
-                      if (!narrow) ...[
-                        const SizedBox(height: 24),
-                        Padding(
-                          padding: const EdgeInsets.all(18),
-                          child: CustomText(
-                            'Offline-first billing for small businesses',
-                            color: Colors.white.withValues(alpha: .68),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
+        child: ListView(
+          padding: const EdgeInsets.symmetric(vertical: 18),
+          children: [
+            const ListTile(
+              leading: CircleAvatar(child: Icon(Icons.receipt_long)),
+              title: Text('LIMS'),
+            ),
+            ...items.map(
+              (item) => ListTile(
+                selected: index == item.$1,
+                leading: Icon(item.$2),
+                title: Text(item.$3),
+                onTap: () => onChanged(item.$1),
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-class _DesktopNavItem extends StatelessWidget {
-  final IconData icon;
-  final IconData selectedIcon;
-  final String label;
-  final bool selected;
-  final bool narrow;
-  final VoidCallback onTap;
+class _BottomNav extends StatelessWidget {
+  final int index;
+  final ShopkeeperMode mode;
+  final ValueChanged<int> onChanged;
 
-  const _DesktopNavItem({
-    required this.icon,
-    required this.selectedIcon,
-    required this.label,
-    required this.selected,
-    required this.narrow,
-    required this.onTap,
+  const _BottomNav({
+    required this.index,
+    required this.mode,
+    required this.onChanged,
   });
 
   @override
   Widget build(BuildContext context) {
-    final color = selected
-        ? Theme.of(context).colorScheme.primary
-        : Colors.white.withValues(alpha: .72);
-    return Padding(
-      padding: EdgeInsets.symmetric(horizontal: narrow ? 12 : 18, vertical: 4),
-      child: Tooltip(
-        message: narrow ? label : '',
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(24),
-          child: Container(
-            height: 48,
-            decoration: BoxDecoration(
-              color: selected
-                  ? Theme.of(context).colorScheme.primary.withValues(alpha: .12)
-                  : Colors.transparent,
-              borderRadius: BorderRadius.circular(24),
-            ),
-            child: Row(
-              mainAxisAlignment: narrow
-                  ? MainAxisAlignment.center
-                  : MainAxisAlignment.start,
-              children: [
-                SizedBox(width: narrow ? 0 : 18),
-                Icon(selected ? selectedIcon : icon, color: color),
-                if (!narrow) ...[
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: CustomText(
-                      label,
-                      variant: CustomTextStyle.subtitle,
-                      color: color,
-                      fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ],
-            ),
+    final items = <(int, IconData, String)>[
+      (0, Icons.space_dashboard_outlined, 'Home'),
+      (1, Icons.inventory_2_outlined, 'Products'),
+      if (mode == ShopkeeperMode.counterBilling)
+        (2, Icons.point_of_sale_outlined, 'Billing'),
+      (5, Icons.receipt_long_outlined, 'Orders'),
+      (6, Icons.settings_outlined, 'Settings'),
+    ];
+    return NavigationBar(
+      selectedIndex: items
+          .indexWhere((item) => item.$1 == index)
+          .clamp(0, items.length - 1),
+      onDestinationSelected: (value) => onChanged(items[value].$1),
+      destinations: [
+        for (final item in items)
+          NavigationDestination(icon: Icon(item.$2), label: item.$3),
+      ],
+    );
+  }
+}
+
+class CustomerShell extends StatefulWidget {
+  final LocalProfile profile;
+  final VoidCallback onLeaveProfile;
+
+  const CustomerShell({
+    super.key,
+    required this.profile,
+    required this.onLeaveProfile,
+  });
+
+  @override
+  State<CustomerShell> createState() => _CustomerShellState();
+}
+
+class _CustomerShellState extends State<CustomerShell>
+    with WidgetsBindingObserver {
+  int _index = 0;
+  StreamSubscription<CustomerBuzzEvent>? _buzzes;
+  StreamSubscription<String>? _notificationNav;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _buzzes = NearbyConnectionService.instance.customerBuzzEvents.listen(
+      _showBuzz,
+    );
+    _notificationNav = NotificationService.instance.onNavigateToOrder.listen(
+      _openOrder,
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final orderId = NotificationService.instance.consumePendingOrderId();
+      if (orderId != null) _openOrder(orderId);
+      NearbyConnectionService.instance.resumeForForeground(widget.profile);
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      NearbyConnectionService.instance.resumeForForeground(widget.profile);
+    } else {
+      NearbyConnectionService.instance.pauseForBackground();
+    }
+  }
+
+  Future<void> _showBuzz(CustomerBuzzEvent event) async {
+    if (!mounted) return;
+    final viewOrder = await showDialog<bool>(
+      context: context,
+      builder: (_) => CustomerBuzzDialog(event: event),
+    );
+    await NearbyConnectionService.instance.respondToCustomerBuzz(event.eventId);
+    if (viewOrder == true && mounted) _openOrder(event.orderId);
+  }
+
+  void _openOrder(String orderId) {
+    if (!mounted) return;
+    setState(() => _index = 1);
+    final order = AppDatabase.instance.orderForProfile(
+      widget.profile.id,
+      orderId,
+    );
+    if (order != null) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => CustomerOrderDetailPage(
+            profile: widget.profile,
+            orderId: orderId,
           ),
+        ),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _buzzes?.cancel();
+    _notificationNav?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pages = [
+      NearbyShopsPage(
+        profile: widget.profile,
+        onOpenOrders: () => setState(() => _index = 1),
+      ),
+      CustomerOrdersPage(profile: widget.profile),
+      CustomerSettingsPage(
+        profile: widget.profile,
+        onSwitchProfile: widget.onLeaveProfile,
+        onLogout: widget.onLeaveProfile,
+      ),
+    ];
+    const destinations = [
+      (Icons.storefront_outlined, 'Nearby'),
+      (Icons.receipt_long_outlined, 'Orders'),
+      (Icons.settings_outlined, 'Settings'),
+    ];
+    return GlassBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        body: SafeArea(
+          child: IndexedStack(index: _index, children: pages),
+        ),
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: _index,
+          onDestinationSelected: (value) => setState(() => _index = value),
+          destinations: [
+            for (final item in destinations)
+              NavigationDestination(icon: Icon(item.$1), label: item.$2),
+          ],
         ),
       ),
     );
   }
+}
+
+class CustomerBuzzDialog extends StatelessWidget {
+  final CustomerBuzzEvent event;
+
+  const CustomerBuzzDialog({super.key, required this.event});
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text('${event.shopName} needs your attention'),
+    content: Text(
+      'The shopkeeper is calling you about order ${event.orderId.substring(0, event.orderId.length.clamp(0, 8)).toUpperCase()}.',
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context, false),
+        child: const Text('Dismiss'),
+      ),
+      FilledButton(
+        onPressed: () => Navigator.pop(context, true),
+        child: const Text('View order'),
+      ),
+    ],
+  );
 }

@@ -20,8 +20,9 @@ android {
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        isCoreLibraryDesugaringEnabled = true
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 
     defaultConfig {
@@ -29,7 +30,7 @@ android {
         applicationId = "com.Sarthak.lims"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        minSdk = 31
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
@@ -44,6 +45,16 @@ android {
         }
     }
 
+    dependencies {
+        coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+        // Same library sources as the local Meshrabiya reference project.
+        implementation(project(":meshrabiya-local"))
+        implementation("androidx.datastore:datastore-preferences:1.1.7")
+        implementation("org.nanohttpd:nanohttpd:2.3.1")
+        implementation("com.squareup.okhttp3:okhttp:4.12.0")
+        implementation("com.github.seancfoley:ipaddress:5.4.0")
+    }
+
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("release")
@@ -53,7 +64,7 @@ android {
 
 kotlin {
     compilerOptions {
-        jvmTarget.set(JvmTarget.JVM_11)
+        jvmTarget.set(JvmTarget.JVM_17)
     }
 }
 
