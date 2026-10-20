@@ -1,58 +1,128 @@
 # LIMS
 
-Offline-first invoice software for small businesses that need a simple, local, and affordable way to manage products, invoice templates, billing, and PDF invoices across Android and Windows.
+LIMS is an offline-first invoice, shop ordering, and local mesh communication app for small businesses. It runs on Android and Windows, stores operational data locally in SQLite, and lets customers connect to a shop over a nearby Wi-Fi mesh connection without requiring cloud infrastructure.
 
-## Current Features
+## Features
 
-- Professional responsive dashboard with revenue, pending amount, invoice count, and product count.
-- SQLite local database for products, invoice templates, invoices, invoice items, payments, customers, and app settings.
-- One-time migration from the older JSON product/template files when a previous save location exists.
-- Product management with search, add, edit, bulk selection, and delete.
-- Fast billing mode with quantity steppers, adaptive cart panel, and local PDF generation.
-- Invoice template manager with logo path, currency, notes, terms, accent color, and selected-template support.
-- Settings screen for choosing or resetting the invoice PDF save folder.
-- Adaptive Material 3 UI: desktop sidebar on Windows/tablets and bottom navigation on compact Android screens.
+### Shopkeeper tools
 
-## Architecture
+- Responsive dashboard with revenue, pending amount, invoice count, product count, and recent activity.
+- Product catalog management with search, add, edit, bulk selection, and delete actions.
+- Counter billing with quantity controls, cart management, and local PDF invoice generation.
+- Invoice history with local invoice records and generated PDF files.
+- Invoice templates with logo path, currency, notes, terms, accent color, and selected-template support.
+- Customer order management with New, Active, Ready, Completed, and All filters.
+- Order status updates, pickup time estimates, customer reachability, order messaging, and optional buzz notifications.
+- Shop menu publishing for nearby customers.
+- Mesh node controls for starting a shop hotspot, showing a connection QR code, and transferring files to connected devices.
+
+### Customer tools
+
+- Customer profiles stored locally on the device.
+- QR-based connection to a shop's Wi-Fi mesh node.
+- Shop menu synchronization over the local connection.
+- Product browsing and order creation without an internet backend.
+- Local order history and order detail screens.
+- Order status updates while connected to the shop.
+
+### Shared app features
+
+- Role-based profiles for Shopkeeper and Customer users.
+- Multiple local profiles on one device with profile switching.
+- Offline-first SQLite storage for products, templates, invoices, customers, shops, profiles, orders, and synchronization metadata.
+- Nearby transport support using Wi-Fi Direct, local network connections, and Bluetooth-compatible nearby discovery where supported.
+- Delta synchronization for transferring only changed records between connected devices.
+- Local notifications, vibration feedback, and foreground connection handling on Android.
+- Adaptive Material 3 interface with a desktop/sidebar layout and compact Android bottom navigation.
+- File picking and opening for invoice PDFs and transferred files.
+
+## How local mesh ordering works
+
+1. A shopkeeper opens the mesh node screen and starts the shop hotspot.
+2. LIMS displays a QR code containing the shop connection information.
+3. The customer scans the QR code from the Customer screen.
+4. The customer device joins the shop's local Wi-Fi connection and synchronizes the shop menu.
+5. The customer places an order from the synchronized menu.
+6. The shopkeeper receives the order locally and updates its status through preparation and pickup.
+
+The mesh workflow is designed for nearby communication. It does not require a hosted API or continuous internet access. Android permissions, Wi-Fi support, and device capabilities determine which nearby transport options are available.
+
+## Project structure
 
 ```text
 lib/
-  app/          App shell, theme, responsive helpers
-  core/         SQLite database and data models
-  features/     Dashboard, products, billing, templates
-  shared/       Reusable UI helpers and widgets
+  app/                 App shell, theme, responsive helpers, and navigation
+  core/                SQLite database, profiles, notifications, mesh services
+  core/nearby/         Nearby transports, sessions, reconnection, and protocols
+  data/                Database migrations and synchronization data helpers
+  Pages/               Dashboard, products, billing, invoices, templates,
+                       customers, orders, profiles, and mesh screens
+  shared/              Reusable UI, help, file, and formatting helpers
+  sync/                Delta store, sync messages, and synchronization logic
+test/                  Unit, widget, and integration tests
+android/               Android platform code and mesh bridge implementation
+third_party/           Local flutter_nearby_connections_plus plugin source
+tools/                 Development and screenshot utilities
 ```
 
-The app intentionally avoids heavy state-management frameworks for now. Pages read/write through `AppDatabase` and refresh the shell after mutations. This keeps the codebase approachable for contributors and lightweight for low-end devices.
+The app intentionally keeps its application logic close to the pages and service classes instead of introducing a large state-management framework. `AppDatabase` is the local source of truth, while nearby services coordinate connections and synchronization around the active profile.
 
-## Local Data
+## Local data and files
 
-Data is stored in a portable SQLite database under the platform application-support directory. Generated invoices are saved in the folder selected from Settings, with a default `invoices` folder beside the database.
+LIMS stores its SQLite database in the platform application-support directory. Profile data, shop data, products, customers, orders, invoices, templates, and synchronization state remain on the device unless explicitly transferred through a nearby connection.
 
-Planned portability features:
+Generated invoices are saved in the folder selected from Settings. If no folder has been selected, the app uses a local `invoices` directory beside the application data. Files received through the mesh transfer screen can be opened from the app after they are accepted.
 
-- Export/import backup ZIP containing the database, logos, and PDFs.
-- CSV import/export for products and customers.
-- Invoice history restore on another device.
+## Requirements
+
+- Flutter SDK compatible with Dart `^3.12.2`.
+- Android Studio and an Android device or emulator for Android builds.
+- A Windows desktop environment for Windows builds.
+- Camera permission for scanning shop connection QR codes.
+- Nearby Wi-Fi, Bluetooth, and notification permissions as requested by Android for mesh and order features.
+
+The local `third_party/flutter_nearby_connections_plus` package is used through a dependency override in `pubspec.yaml`. Keep that directory available when running `flutter pub get`.
 
 ## Setup
 
 ```bash
 flutter pub get
 flutter analyze
+flutter test
+```
+
+Run the application on a target platform:
+
+```bash
 flutter run -d windows
 flutter run -d android
 ```
 
-## Roadmap
+For mesh testing, use two physical Android devices when possible. Create a Shopkeeper profile on one device, start its mesh node, scan its QR code from a Customer profile on the second device, and then place a test order.
 
-- Customer management.
-- Invoice history screen with open/share/export actions.
-- Tax, discount, due date, payment status, and overdue tracking.
-- Backup and restore.
-- CSV import/export.
-- UPI QR support.
-- Dashboard charts.
-- Light/dark theme toggle.
-- Widget and database tests.
-- CI workflow for `flutter analyze` and builds.
+## Testing
+
+The test suite covers invoice and order UI flows, customer QR and order behavior, SQLite synchronization, nearby transport codecs and routing, reconnection, Wi-Fi hotspot behavior, and mesh page interactions.
+
+Run the complete suite with:
+
+```bash
+flutter test
+```
+
+Use static analysis before submitting changes:
+
+```bash
+flutter analyze
+```
+
+## Development notes
+
+- The Android mesh bridge is implemented in `android/app/src/main/kotlin/com/Sarthak/lims/` and communicates with Flutter through the `lims/meshrabiya` method and event channels.
+- Android mesh communication uses cleartext local traffic and foreground connected-device services where required by the platform.
+- Customer discovery currently uses the shop QR connection flow as the primary connection path.
+- Local profile data is intentionally device-local. Switching profiles logs out of the active role without deleting the other profiles or their data.
+
+## License
+
+This project is currently maintained as a private application repository. Add the project license here when a distribution license is selected.
